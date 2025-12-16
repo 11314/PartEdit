@@ -1,29 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Legacy-unified runner that keeps the original DAAM stack and training behavior.
-
-- Uses: OVAM_TRAIN(_cross).run_ovam_training + main_logic.load_model (unchanged)
-- Data: dataset_hf.HFImageMaskDataset (HuggingFace DatasetDict -> (img, mask))
-- Logging: dual (file + terminal) via original get_logger
-- Progress: visible tqdm (monkey-patch MyCallback to stdout + dynamic width)
-- Reproducibility: --config YAML + explicit seeds + deterministic flags
-- No N_list / -N sweeps; single run semantics
-
-Usage (CLI):
-  CUDA_VISIBLE_DEVICES=0 python legacy_unified_runner.py \
-      --hf_id "Aleksandar/partedit_parts" \
-      --train_split train --val_split val \
-      --TEXT "Quadruped Head" --TEXT_INIT "head" \
-      --use_SDXL --resize 1024 \
-      --initial_lr 30.0 --n_epochs 2000 \
-      --loss_type l2 --strength 0.25 --guidance_scale 7.5 \
-      --save_dir runs/hf_min/l2_lr30_head
-
-Usage (YAML + overrides):
-  python legacy_unified_runner.py --config configs/min.yaml --use_fp16
-"""
-
 import os
 import sys
 import yaml
@@ -32,22 +8,15 @@ import torch
 import logging
 import argparse
 import gc
-import random, numpy as np
+import random
+import numpy as np
 from typing import Tuple, List
 from torch.utils.data import DataLoader
 import torchvision.transforms as T
 from torchvision.transforms.functional import InterpolationMode
-
-# --- Import the *existing* stack (unchanged)
-#     We keep DAAM, attention hooks, loss, etc. exactly as in your repo.
-# from src.OVAM_TRAIN_cross import run_ovam_training, get_logger   # dual logger as before
-
 from typing import Union, Optional
 
 # Import the OVAM library
-from ovam import StableDiffusionHooker
-from ovam.utils import set_seed, get_device
-from ovam.utils.dcrf import densecrf
 from ovam.stable_diffusion.daam_module import StableDiffusionDAAM, StableDiffusionXLDAAM
 from ovam.stable_diffusion.locator import SlimeAttentionLocator
 
@@ -60,27 +29,13 @@ from diffusers import (
 from src.dataset_hf import HFImageMaskDataset
 
 from .main_logic import (
-    display_count_images,
-    optimize_embedding,
-    fig_to_image,
-    stack_images,
-    encode_decode,
-    visualize_one,
-    get_correct_masks_and_images,
-    visualize_prepared,
     process_text,
-    plot_attention_maps,
-    combine_pil_vertically,
     save_opt_embedding,
-    MyCallback,
     initial_forwardpass,
     train_embedding,
     generate_images,
-    calculate_loss,
     prepare_idx,
     prepare_masks,
-    OG_INIT_CHOICES,
-    INIT_CHOICES,
     get_init_embedding,
     load_model,
     load_embd
@@ -130,7 +85,7 @@ def run_training(
     guidance_scale: float = 7.5,
     TEXT="Quadruped Head",
     TEXT_INIT="Head",
-    init_embed_format="abl_N{}_0.pt",  # "abl_N{}_{runidx}.pt",
+    init_embed_format="N{}_0.pt",  # "N{}_{runidx}.pt",
     # decoded_full_idx: int = 3,  # Change this based on TEXT
     gamma=0.7,
     step_size: int = 80,  # StepLR step
@@ -381,7 +336,7 @@ def run_training(
     # Change verbos for inference
     hooker_kwargs['locator_kwargs'].update({'verbose': False})
 
-    rimg, losses = generate_images(
+    rimg, _ = generate_images(
         opt_embedding=opt_embd,
         init_embd=_clone_init,
         word_embd= _embedding,
@@ -404,15 +359,11 @@ def run_training(
     )
     rimg.save(f"{save_dir}/vis_train_{_log_name}.png")
 
-    if not skip_saving:
-        with open(f"{save_dir}/maps_train_{_log_name}.pt", "wb") as f:
-            torch.save(losses, f)
-
     gc.collect()
     torch.cuda.empty_cache()
 
     # Generate images and save losses for testing data
-    rimg_test, losses_test = generate_images(
+    rimg_test, _ = generate_images(
         opt_embedding=opt_embd,
         init_embd=_clone_init,
         word_embd= _embedding,
@@ -433,18 +384,7 @@ def run_training(
         _v= _v,
         hooker_kwargs=hooker_kwargs
     )
-    
-    
-
     rimg_test.save(f"{save_dir}/vis_val_{_log_name}.png")
-
-    if not skip_saving:
-        # save example_masks_test
-        with open(f"{save_dir}/maps_gt_val_{_log_name}.pt", "wb") as f:
-            torch.save(example_masks_test, f)
-
-        with open(f"{save_dir}/maps_val_{_log_name}.pt", "wb") as f:
-            torch.save(losses_test, f)
 
     return
 
