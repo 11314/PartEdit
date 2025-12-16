@@ -39,7 +39,6 @@ PART_TOKENS = {
     "biped_head": download_part(8),
     "quadruped_head": download_part(3),
     "human_torso": download_part(7), # based on partimage
-    "new_head": "/datawaha/cggroup/cvejica/LocalEdit/third_party/PartEdit/thirdparty/partedit/runs/head/full/N100_fold0.pt"
 }
 
 
