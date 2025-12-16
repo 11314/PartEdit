@@ -29,6 +29,7 @@
 ![teaser](assets/teaser.jpg)
 
 # 🎉News
+- **[2025-12-15]** Released the training code with huggingface dataset support (also [example dataset on huggingface](https://huggingface.co/datasets/Aleksandar/partedit_parts)).
 - **[2025-09-02]** PartEdit local gradio demo released and huggingface demo live at [huggingface](https://huggingface.co/spaces/Aleksandar/PartEdit).
 - **[2025-09-01]** PartEdit embeddings and custom training data used released on [huggingface](https://huggingface.co/datasets/Aleksandar/PartEdit-extra) .
 - **[2025-06-02]** PartEdit updated version now on [Arxiv](https://arxiv.org/abs/2502.04050v2).
@@ -80,11 +81,29 @@ The current code has been tested with diffusers library. But there might be mino
 ## Data
 
 The datasets generated in the experiments can be found at [Pascal Part](https://roozbehm.info/pascal-parts/pascal-parts.html) and [PartImageNet](https://github.com/TACJu/PartImageNet).
-We train Human Torso, Human Head and Human Hair from Pascal Part and PartImageNet for the rest that is not [custom](https://huggingface.co/datasets/Aleksandar/PartEdit-extra). 
+We train Human Torso, Human Head and Human Hair from Pascal Part and PartImageNet for the rest that is not [custom](https://huggingface.co/datasets/Aleksandar/PartEdit-extra). I have extracted example dataset [hosted on huggingface](https://huggingface.co/datasets/Aleksandar/partedit_parts) to provide example, and remove the hard link with detectron2 used previously for training. 
 
 # 💖Acknowledgements
 
-We want to thank the authors of [Prompt-to-Prompt-with-sdxl](https://github.com/RoyiRa/prompt-to-prompt-with-sdxl) and [DAAM](https://github.com/castorini/daam), StabilityAI ([Stable diffusion XL](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0)),  
+We want to thank the authors of [Prompt-to-Prompt-with-sdxl](https://github.com/RoyiRa/prompt-to-prompt-with-sdxl) and [DAAM](https://github.com/castorini/daam), StabilityAI ([Stable diffusion XL](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0)), and [OVAM](https://github.com/vpulab/ovam) which was used for the training base [OVAMXL](https://github.com/Gorluxor/ovamxl) and [SLiMe](https://github.com/aliasgharkhani/SLiMe) for layer selection optimization. 
+
+## Todos
+
+- Fix fp16 training
+
+# Training 
+
+To train install the updated enviroment.yaml or update with `pip install torchmetrics git+https://github.com/Gorluxor/ovamxl.git`
+
+```python
+python -m src.unified_training --config configs/quadruped_head.yaml 
+```
+
+Can check the dataset for other classes or create your own from synthetic or real data. 
+
+Note: Takes around 64GB with fp32 and 8 layers selected on 100 images with 2000 steps (approx ~1.5 hours on Nvidia A100 80GB). Training with full gradiant over the small dataset. 
+
+
 
 # 🎈Citation
 

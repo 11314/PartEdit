@@ -1,0 +1,22 @@
+hf_id: "Aleksandar/partedit_parts"
+train_split: "train"
+val_split: "val"
+class_name: "quadruped_head"  # Options: biped_foot, biped_head, quadruped_head, etc.
+TEXT: "Quadruped Head"
+TEXT_INIT: "head"
+resize: 1024
+batch_size_io: 64
+num_workers: 4
+n_epochs: 2000
+initial_lr: 30.0
+strength: 0.25
+guidance_scale: 7.5
+gamma: 0.7
+step_size: 80
+loss_type: "l2"
+optimizer: "adam"
+save_dir: "runs/quadruped_head/1"
+use_SDXL: true
+use_fp16: false
+log_file: "run.log"
+seed: 0

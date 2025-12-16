@@ -39,6 +39,7 @@ PART_TOKENS = {
     "biped_head": download_part(8),
     "quadruped_head": download_part(3),
     "human_torso": download_part(7), # based on partimage
+    "new_head": "/datawaha/cggroup/cvejica/LocalEdit/third_party/PartEdit/thirdparty/partedit/runs/head/full/N100_fold0.pt"
 }
 
 
@@ -90,6 +91,7 @@ class PartEditSDXLModel:
         seed: int = 0,
         eta: int = 0,
         t_e: int = 50,
+        n_cross_replace: float = 0.4
     ) -> PIL.Image.Image:
 
         # Sanity Checks
@@ -113,7 +115,7 @@ class PartEditSDXLModel:
         cross_attention_kwargs = {
             "edit_type": "replace",
             "n_self_replace": 0.0,
-            "n_cross_replace": {"default_": 1.0, edit: 0.4},
+            "n_cross_replace": {"default_": 1.0, edit: n_cross_replace},
         }
         extra_params = DotDictExtra()
         extra_params.update({"omega": 1.5, "edit_steps": t_e})

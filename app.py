@@ -81,6 +81,7 @@ title = f"""
       <p style="margin: 6px 0 0 0; font-size: 14px;">
         It <b>simultaneously predicts the part-localization mask and edits the original trajectory</b>.
         Supports <b>Hugging Face ZeroGPU</b> and one-click <b>Duplicate</b> for private use.
+        VRAM usage note: Should be able to run on less than 14 GB VRAM at fp16. 
       </p>
     </div>
 </div>
@@ -106,11 +107,12 @@ def edit_demo(model: PartEditSDXLModel) -> gr.Blocks:
         guidance_scale: float = 7.5,
         seed: int = 0,
         t_e: int = 50,
+        n_cross_replace: float = 0.4,
         progress=gr.Progress(track_tqdm=True),
     ) -> Tuple[List, Optional[PIL.Image.Image]]:
         if seed == -1:
             seed = random.randint(0, MAX_SEED)
-
+        n_cross_replace = float(n_cross_replace) # to make sure 0 and 1 are float
         out = model.edit(
             prompt=prompt,
             subject=subject,
@@ -121,6 +123,7 @@ def edit_demo(model: PartEditSDXLModel) -> gr.Blocks:
             guidance_scale=guidance_scale,
             seed=seed,
             t_e=t_e,
+            n_cross_replace=n_cross_replace
         )
 
         # Accept either (image, mask) or just image from model.edit
@@ -176,6 +179,14 @@ def edit_demo(model: PartEditSDXLModel) -> gr.Blocks:
                         step=1,
                         value=int(first_ex[8]),
                     )
+                    n_cross_replace = gr.Slider(
+                        label="N cross replace",
+                        minimum = 0.0,
+                        maximum = 1.0,
+                        step = 0.1,
+                        value = 0.4,
+                        interactive=True
+                    )
                 with gr.Accordion('Citation', open=True):
                     gr.Markdown(citation)
 
@@ -202,7 +213,7 @@ def edit_demo(model: PartEditSDXLModel) -> gr.Blocks:
                     visible=False          # <-- hide until we have a file
                 )
 
-        inputs = [prompt, subject, part, edit, negative_prompt, num_inference_steps, guidance_scale, seed, t_e]
+        inputs = [prompt, subject, part, edit, negative_prompt, num_inference_steps, guidance_scale, seed, t_e, n_cross_replace]
 
         gr.Examples(
             examples=examples,

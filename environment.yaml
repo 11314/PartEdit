@@ -25,8 +25,10 @@ dependencies:
   - huggingface_hub<0.26.0 # https://github.com/easydiffusion/easydiffusion/issues/1851#issuecomment-2437615074
   - pydantic<=2.10.6 # https://github.com/facebookresearch/vggt/issues/260#issuecomment-3067853650
   - pip:
-    - diffusers==0.27.2
+    - diffusers==0.27.2 # note: original training code used `diffusers==0.22.0`
     - transformers==4.44.1 # note 
     - accelerate
     - datasets # tested on 3.3.2
     - spaces
+    - torchmetrics
+    - git+https://github.com/Gorluxor/ovamxl.git # added for training setup
