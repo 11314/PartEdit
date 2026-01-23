@@ -51,6 +51,7 @@ OG_INIT_CHOICES = ["random", "token", "token_random", "average"]
 INIT_CHOICES = OG_INIT_CHOICES + [f"{x}_norm" for x in OG_INIT_CHOICES]
 
 
+
 def min_max(attn: torch.Tensor, _eps=1e-8) -> torch.Tensor:
     _min, _max = attn.min(), attn.max()
     return (attn - _min) / (_max - _min + _eps)
@@ -78,7 +79,7 @@ def display_count_images(batch, nrow=8):
     )
 
 
-# Slightly changed implementation from ovam.optimize import optimize_embedding
+# 略微改变了ovam的实现。优化导入optimize_embedding
 def optimize_embedding(
     daam_module: "DAAMModule",
     embedding: "torch.Tensor",
@@ -134,26 +135,26 @@ def optimize_embedding(
     To obtain the losses during optimization use the callback function.
 
     """
-    # assert autocast_enabled != True, "Cast is not supported in this version"
-    # Infer the device
+    # 略微改变了ovam的实现。优化导入optimize_embedding
+    # 保证 embedding / target / model 在同一设备
     device = embedding.device if device is None else device
 
-    # Clone the embedding as a trainable tensor
+    # 将嵌入克隆为可训练张量/冻结模型，只让 embedding 可学习
     x = embedding.detach().clone().requires_grad_(True)
-    x.retain_grad()
+    x.retain_grad() # 保留梯度
     x.to(device)
     daam_module.to(device)
-    # Move the target to the device
+    # 将target移动到设备上
     target.to(device)
 
-    # Define the optimizer, scheduler and loss function
+    # 定义优化器、调度程序和损失函数
 
     if optimizer == "adam":
-        optimizer = optim.AdamW([x], lr=initial_lr)
+        optimizer = optim.AdamW([x], lr=initial_lr) # 只传x，彻底冻结模型参数
     else:
         optimizer = optim.SGD([x], lr=initial_lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
-    if loss_type == "bce":
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)  # 学习率调度器，防止 embedding 后期震荡，让 attention mask 稳定收敛
+    if loss_type == "bce":  # 根据传入的loss类型，选取
         loss_fn = nn.BCELoss(reduction="mean")
     elif loss_type == "l2":
         loss_fn = nn.MSELoss(reduction="mean")
@@ -170,21 +171,21 @@ def optimize_embedding(
         raise ValueError(f"Loss type {loss_type} not supported.")
     _x_half = None
     
-    # Use tqdm only if no callback is provided (callback has its own progress bar)
+    # 只有在没有提供回调时才使用tqdm（回调有自己的进度条）
     iterator = range(epochs) if callback is not None else tqdm(range(epochs), desc="Optimizing embedding", position=0, dynamic_ncols=True, leave=True, file=sys.stdout)
     
     for i in iterator:
-        optimizer.zero_grad()
+        optimizer.zero_grad()   # optimizer.zero_grad()
         with torch.autocast(device_type="cuda", enabled=autocast_enabled):
             # import ipdb; ipdb.set_trace()
-            mask = daam_module.forward(x)
-            # Apply min max normalization
+            mask = daam_module.forward(x)   # 用 embedding 生成 attention mask
+            # 应用最小最大归一化
             if loss_type != "bcelog":
                 if isinstance(apply_min_max, float):
                     mask = mask / apply_min_max
-                elif apply_min_max:  # For the lineal case
+                elif apply_min_max:  # 对于线性情况
                     minimun, maximun = mask.min(), mask.max()
-                    mask = (mask - minimun) / (maximun - minimun + 1e-8)
+                    mask = (mask - minimun) / (maximun - minimun + 1e-8)    # 归一化attention
                 else:
                     mask = mask / mask.sum(dim=1, keepdim=True)
             else:
@@ -195,10 +196,10 @@ def optimize_embedding(
                 if mask.ndim == 2:
                     mask = mask.unsqueeze(0)
             if loss_type in ["nll", "cross"]:
-                mask = torch.log(mask + 1e-8)
+                mask = torch.log(mask + 1e-8)   # 让 token attention 在 GT 区域概率最大
             try:
                # print(f'{mask.shape=} {target.shape=}, {mask.dtype=} {target.dtype=}, {mask.max()=}, {mask.min()=}, {target.max()=}, {target.min()=}')
-                loss = loss_fn(mask, target)
+                loss = loss_fn(mask, target)    # 计算 loss
             except Exception as e:
                 ipdb.set_trace()
                 raise e
@@ -206,11 +207,11 @@ def optimize_embedding(
         if callback is not None:
             callback(i, x, mask, loss)
 
-        loss.backward()
-        optimizer.step()
+        loss.backward() # 反向传播
+        optimizer.step()    # 更新embedding
         scheduler.step()
         if epochs //2 == i:
-            _x_half = x.clone().detach()
+            _x_half = x.clone().detach()    # _x_half的作用是对比早起embedding、中期embedding和后期embedding
     return x.detach().cpu(), _x_half
 
 
@@ -254,9 +255,9 @@ def stack_horizontally(images):
     return new_im
 
 def encode_decode(ovam_evaluator, text, add_special: bool = True) -> list[str]:
-    text_encoded = ovam_evaluator.tokenizer.encode(text, add_special_tokens=add_special)
-    decoded_str = [ovam_evaluator.tokenizer.decode(k) for k in text_encoded]
-    # replace <|startoftext|> and <|endoftext|> with <SoT> and <EoT>
+    text_encoded = ovam_evaluator.tokenizer.encode(text, add_special_tokens=add_special)    # 编码文本为 token IDs（模型真实使用的）
+    decoded_str = [ovam_evaluator.tokenizer.decode(k) for k in text_encoded]    # 把 token ID 解码回字符串（用于对齐）
+    # replace <|startoftext|> and <|endoftext|> with <SoT> and <EoT>/特殊 token 的人类可读替换（非训练必需，但很重要）
     decoded_str = [
         k.replace("<|startoftext|>", "<SoT>").replace("<|endoftext|>", "<EoT>")
         for k in decoded_str
@@ -439,7 +440,7 @@ def visualize_prepared(imgs):
 
     return ToPILImage()(make_grid(imgs.to(torch.float32)))
 
-
+# 把数据集里的 GT mask，转换成一个“可用于 token–attention 监督的二分类目标”
 def prepare_masks(
     example_masks: torch.Tensor, cur_idx: list[int]
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -455,19 +456,19 @@ def prepare_masks(
         - _selected_masks (torch.Tensor): The raw selected masks.
         - selected_masks (torch.Tensor): The processed selected masks.
     """
-    cur_idx = [cur_idx] if isinstance(cur_idx, int) else cur_idx
-    _selected_masks = example_masks[cur_idx, ...]
-    if _selected_masks.ndim == 3:
+    cur_idx = [cur_idx] if isinstance(cur_idx, int) else cur_idx    # 统一索引格式（保证 batch 维度）
+    _selected_masks = example_masks[cur_idx, ...]   # 从完整数据集中取出当前训练样本的 mask
+    if _selected_masks.ndim == 3:   # 处理“单样本维度坍塌”的特殊情况
         assert isinstance(
             cur_idx, int
         ), f"Dimensionality is 3, but {cur_idx=} is not int ({type(cur_idx)})"
         _selected_masks = _selected_masks[None]
-    # Make negatives for the selected masks
+    # 为选出的mask制作底片
     selected_masks = torch.cat([1 - _selected_masks, _selected_masks], dim=1)
-    assert selected_masks.ndim == 4, f"{selected_masks.shape=} should be B C H W, C=2"
+    assert selected_masks.ndim == 4, f"{selected_masks.shape=} should be B C H W, C=2"  # 维度断言（确保训练安全）
     return _selected_masks, selected_masks
 
-
+# 把文本 TEXT 转换成“可训练 token embedding 的原始起点”
 def process_text(
     ovam_evaluator: Union["StableDiffusionDAAM", "StableDiffusionXLPipeline"],
     TEXT: str,
@@ -484,6 +485,7 @@ def process_text(
         - _embedding (torch.Tensor): The raw embedding of the text.
         - decoded_str (str): The decoded string after encoding and decoding the text.
     """
+    # 强制 Text Encoder 使用 FP32（数值稳定性）为 token-level optimization 特别做的稳定性处理
     if ovam_evaluator.text_encoder.dtype == torch.float16:
         ovam_evaluator.text_encoder = ovam_evaluator.text_encoder.to(torch.float32)
         if hasattr(ovam_evaluator, "text_encoder_2"):
@@ -491,7 +493,7 @@ def process_text(
                 torch.float32
             )
     if "XL" in ovam_evaluator.__class__.__name__:            
-        # removed depedence on OVAM get text
+        # 删除 OVAM 获取文本的依赖
         _embedding = full_encode_sdxl(
             ovam_evaluator,
             text=TEXT,
@@ -500,7 +502,7 @@ def process_text(
             padding=False,
         )[
             :-1
-        ]  # we skip the pooled token
+        ]  # 跳过被池化的 token，因为没有空间对应，无法对齐 mask
     else:
         _embedding = encode_text(
             ovam_evaluator.tokenizer,
@@ -511,8 +513,8 @@ def process_text(
             padding=False,
         )
         print(f"Embedding shape {_embedding.shape}")
-        _embedding = _embedding[:-1] # copied from ipynb of OVAM_TRAIN
-    # Encode and decode the text
+        _embedding = _embedding[:-1] # 从OVAM_TRAIN的ipynb复制
+    # 编码，解码文本（token 对齐用）
     decoded_str = encode_decode(ovam_evaluator, TEXT)
     return _embedding, decoded_str
 
@@ -609,6 +611,7 @@ def combine_pil_vertically(pil1, pil2):
     return new_im
 
 
+# 它负责把“已经训练完成的 token embedding”以一个可复现实验的方式保存到磁盘，并返回保存状态。
 def save_opt_embedding(
     opt_embedding,
     trained_new,
@@ -616,21 +619,21 @@ def save_opt_embedding(
     direct_embd_name: int = None,
 ):
     if direct_embd_name is not None:
-        embd_name = direct_embd_name
+        embd_name = direct_embd_name    # 如果没有指定embedding名字，就使用指定编号生成文件名
         f_l = file_save.format(embd_name)
     else:
-        potential_files = glob(file_save.format("*"))
-        offset = 0 if trained_new else -1
-        embd_name = len(potential_files) + offset
+        potential_files = glob(file_save.format("*"))   # 否则：自动推断 embedding 编号
+        offset = 0 if trained_new else -1   # 根据训练状态计算偏移量
+        embd_name = len(potential_files) + offset   # 生成embedding名字
         f_l = file_save.format(embd_name)
-    if trained_new:
-        if os.path.exists(f_l):
+    if trained_new: # 如果是新训练，真正保存
+        if os.path.exists(f_l): # 如果文件已存在，记录日志
             # if "debug" not in f_l:
             #     raise ValueError(f"File {f_l} already exists")
             # else:
             logging.info(f"File {f_l} already exists - overriding")
-        torch.save(opt_embedding, f_l)
-        trained_new = False
+        torch.save(opt_embedding, f_l)  # 保存embedding
+        trained_new = False # 修改训练状态，防止多次调用
     return trained_new, f_l, embd_name
 
 import sys
@@ -685,23 +688,26 @@ class MyCallback:
         plt.close(fig)
         return img
 
-
+# 把“你要训练的样本索引”转换成“真正送入扩散模型的 img2img 输入张量”，并确保索引与 token–mask–attention 在整个训练中保持一
 def prepare_idx(cur_idx, tensor_imgs, device) -> tuple[torch.Tensor, list[int]]:
-    cur_idx = [cur_idx] if isinstance(cur_idx, int) else cur_idx
+    cur_idx = [cur_idx] if isinstance(cur_idx, int) else cur_idx    # 统一索引为 list（训练一致性）
+    # 严格断言索引合法（防止 silent bug）
     assert isinstance(cur_idx, list), f"Got {cur_idx=} should be list[int]"
     assert len(cur_idx) >= 1, f"Got empty list {cur_idx=}"
     assert isinstance(
         cur_idx[0], int
     ), f"list elements should be integers got {cur_idx=}"
+    # 从数据集中取出对应图像（img2img 的关键）
     if tensor_imgs is not None and len(tensor_imgs) > 0:
-        # Essentially this is Img2Img
+        # 这就是Img2Img
         selected_tensor = tensor_imgs[cur_idx, ...].to(device)
     else:
         selected_tensor = None
 
     return selected_tensor, cur_idx
 
-
+# 在“不训练任何参数”的前提下，用真实图像跑一次扩散模型，并把 UNet 的 cross-attention 全部 hook 起来，
+# 生成一个“可用于后续 token embedding 训练的评估器（evaluator）”。
 def initial_forwardpass(
     pipeI2I,
     example_imgs: torch.Tensor,
@@ -751,11 +757,11 @@ def initial_forwardpass(
     """
     hooker_kwargs = {} if hooker_kwargs is None else hooker_kwargs
 
-
+    # 判断当前是不是 img2img 条件分支（训练前提检查）
     _cond = "Img2Img" in pipeI2I.__class__.__name__ or hasattr(
         pipeI2I, "text_encoder_2"
     )
-    if prompt == "":
+    if prompt == "": # 强制校验训练模式一致性，prompt为空-使用image条件。prompt非空-用txt2img
         assert example_imgs is not None and isinstance(
             example_imgs, torch.Tensor
         ), f"{type(example_imgs)=}"
@@ -765,21 +771,21 @@ def initial_forwardpass(
     selected_init_tensor = example_imgs
     img_pil = []
     # print(f"INFO: Initial forward pass with {len(cur_idx)} images")
-    with torch.set_grad_enabled(not no_grad_context):
-        with StableDiffusionHooker(
+    with torch.set_grad_enabled(not no_grad_context):   # 进入“是否计算梯度”的控制区,目的不是训练，而是 “搭建训练环境”
+        with StableDiffusionHooker( # hook Unet的Attention层，记录token到spatial attention，为后续训练提供attention extraction接口
             pipeI2I, extract_self_attentions=extract_self_attentions, **hooker_kwargs
         ) as hooker:
-            
+            # 对每一张训练图像跑一次扩散 forward
             for img_idx, img_seed in enumerate(cur_idx):
-                set_seed(1 + seed) if _cond else set_seed(seed + img_seed)
-                _kwargs = (
+                set_seed(1 + seed) if _cond else set_seed(seed + img_seed)  # 控制随机性（保证可复现）
+                _kwargs = ( # img2img 条件扩散 forward（关键）/将image->latent，latent+prompt ->Unet,在Unet内部产生Cross-Attention，使用hook 把attention抓下来。
                     {"image": selected_init_tensor[img_idx][None], "strength": strength}
                     if _cond
                     else {}
                 )
                 out = pipeI2I(prompt=prompt, **_kwargs, guidance_scale=guidance_scale)
-                img_pil.append(out.images[0])
-    return (
+                img_pil.append(out.images[0])   # 收集可视化图像（辅助，不影响训练）
+    return (    # 返回“训练用 evaluator”（极其重要）
         hooker.get_ovam_callable(expand_size=expand_size, **ovam_callable_kwargs) if not return_hooker else hooker,
         img_pil,
     )
@@ -788,24 +794,26 @@ def initial_forwardpass(
 def get_init_embedding(
     start_strategy: str, pipeI2I, _embedding, decoded_full_idx, device
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    # 解析初始化策略（是否归一化）
     do_norm = start_strategy.endswith("_norm")
     start_strategy = start_strategy.replace("_norm", "")
+    # 不是从零开始学token，是从原有的语义上微调
     if start_strategy == "token":
         init_embedding = torch.cat(
             [_embedding[:1], _embedding[decoded_full_idx][None]], dim=0
         )
-    elif start_strategy == "token_random":
+    elif start_strategy == "token_random": # 如果是从完全随机语义开始的话，Attention是完全无结构的，mask supervision很难收敛。所以直接禁用这个策略
         init_embedding = pipeI2I.text_encoder.get_input_embeddings().weight.data.clone()
         raise NotImplementedError("This is not implemented yet")
-    elif start_strategy == "average":
+    elif start_strategy == "average":   # 被训练的token初始化为prompt中所有token的平均语义。
         init_embedding = torch.cat(
             [_embedding[:1], _embedding[1:].mean(dim=0, keepdim=True)], dim=0
         )
-    else:  # random
+    else:  # random。在训练中意味着token没有任何语义先验，Attention初始是噪声。
         init_embedding = torch.randn_like(_embedding[:2]).to(device)
-    if do_norm:
+    if do_norm: # 可选归一化（对 attention 稳定性很重要）
         init_embedding = nn.functional.normalize(init_embedding, p=2, dim=-1)
-    _clone_init = init_embedding.clone().detach().to(device)
+    _clone_init = init_embedding.clone().detach().to(device)    # 保存一份“不可训练的原始副本”
     return init_embedding, _clone_init
 
 
@@ -851,13 +859,13 @@ def train_embedding(
         tuple[bool, torch.Tensor, MyCallback]: A tuple containing a boolean indicating whether the training was successful, the optimized embedding tensor, and the callback object used during training.
     """
     # assert cast == False, f"Disabled cast as it never works"
-    trained_new = True
-    gc.collect()
+    trained_new = True  # 用于在异常时返回失败状态
+    gc.collect()    # 清理 Python 和 CUDA 显存。防止显存碎片影响结果
     torch.cuda.empty_cache()
-    set_seed(0)  # added for reproducability when checking multi image training
-    double_target = double_target.to(device)
+    set_seed(0)  # 增加了检查多图像训练时的再现性/固定 seed → 多图 / 多次实验可复现
+    double_target = double_target.to(device)    # 这是监督信号（GT mask + negative mask）
     try:
-        my_callback = (
+        my_callback = ( # 记录每一个epoch中的当前embedding、attention mask和loss
             MyCallback(init_embedding, device, n_epochs)
             if not disable_logging
             else None
@@ -877,11 +885,11 @@ def train_embedding(
             autocast_enabled=cast,
             optimizer=optimizer,
         )
-    except Exception as e:
+    except Exception as e:  # 异常处理，如果训练失败-标记失败、抛出异常。
         trained_new = False
         raise e
     finally:
-        my_callback.close()
+        my_callback.close() # 训练完毕，关闭Callback
     return trained_new, opt_embedding, _half, my_callback
 
 
@@ -929,19 +937,21 @@ def load_model(
         pipe.set_progress_bar_config(disable=True)
     return pipe
 
+# 把“已经训练好的 token embedding”，重新加载出来，用于生成图像、验证训练效果、评估泛化性
 def load_embd(embd_name, embed_format):
-    _v = "optimized"
-    if isinstance(embd_name, (str, int)):
-        embd_loc = embed_format.format(embd_name)  # "PIN_2"
-        if not os.path.exists(embd_loc):
+    _v = "optimized"    # 默认版本标识
+    if isinstance(embd_name, (str, int)):   # 判断输入类型：名字还是 tensor？
+        embd_loc = embed_format.format(embd_name)  # 如果是已生成的文件，生成 embedding 文件路径,用于下面进行确认
+        if not os.path.exists(embd_loc):    # 确保训练产物存在
             raise ValueError(f"File {embd_loc} does not exist")
-        _v = embd_loc.split("/")[-1]
-        opt_embedding = torch.load(embd_loc)
+        _v = embd_loc.split("/")[-1]    # 用文件名作为版本标识
+        opt_embedding = torch.load(embd_loc)    # 加载 embedding
     else:
         opt_embedding = embd_name
         assert torch.is_tensor(opt_embedding), f"{type(opt_embedding)=}"
     return opt_embedding, _v
 
+# 在训练完成后，用“刚学到的 token embedding”，再跑一遍扩散过程，验证：embedding 是否真的学会了“目标区域语义对齐”
 def generate_images(
     opt_embedding: torch.Tensor,
     init_embd: torch.Tensor,
@@ -966,31 +976,31 @@ def generate_images(
     ovam_callable_kwargs: dict = {},
     hooker_kwargs = None
 ) -> tuple[Image.Image, list[torch.Tensor]]:
-    # we only need example_masks for visualization, keeping on CPU
-    if example_masks is not None:
+    # 我们只需要example_mask用于可视化，占用CPU
+    if example_masks is not None:   # 清理 GPU / 数据迁移到 CPU
         example_masks.cpu()
     example_imgs = example_imgs.cpu()
     gc.collect()
     torch.cuda.empty_cache()
-    img_indices = [img_indices] if isinstance(img_indices, int) else img_indices
+    img_indices = [img_indices] if isinstance(img_indices, int) else img_indices    # 统一索引格式
 
     assert isinstance(
         prompt, str
     ), f"Even though we can pass list or str, we use same prompt {prompt=}"
     
-    assert hooker_kwargs is not None, "Provide hooker_kwargs in generate_images()"
+    assert hooker_kwargs is not None, "Provide hooker_kwargs in generate_images()"  # 校验推理环境，如果没有attention hook，这个函数就无法验证token embedding是否控制了空间区域。
 
-    img_size = 1024 if use_SDXL else 512
+    img_size = 1024 if use_SDXL else 512    # 根据模型版本确定分辨率
     imgs = []
     preds = []
-    with torch.no_grad():
-        for _iidx, img_idx in enumerate(tqdm(img_indices, desc='Inference...')):
-            _selected_masks, selected_masks = prepare_masks(example_masks, img_idx)
+    with torch.no_grad():   # 进入 no_grad 推理模式
+        for _iidx, img_idx in enumerate(tqdm(img_indices, desc='Inference...')):    # 遍历训练 / 测试样本
+            _selected_masks, selected_masks = prepare_masks(example_masks, img_idx) # 为当前样本准备 mask 与 image
             example_imgs_in, cur_idx = prepare_idx(img_idx, example_imgs, device)
-            if selected_masks is not None:  # guard against Text to Image Pipeline
+            if selected_masks is not None:  # 防止文本到图像的管道
                 _selected_masks = (selected_masks[:, 1, ...],)
             with torch.autocast("cuda", enabled=True):
-                ovam_evaluator, img_pil_list = initial_forwardpass(
+                ovam_evaluator, img_pil_list = initial_forwardpass( # 调用 initial_forwardpass,用训练好的embedding所在的pipeline，再跑一次img2img Diffusion
                     pipeI2I,
                     example_imgs_in,
                     cur_idx,
@@ -1008,12 +1018,12 @@ def generate_images(
                     # },
                     ovam_callable_kwargs=ovam_callable_kwargs,
                 )
-                image = img_pil_list[0]
-                # we want to plot only the main subject masks
-                pil_img = plot_attention_maps(
+                image = img_pil_list[0] # 这是被优化 embedding 影响后的生成结果。
+                # 我们只想绘制主体mask
+                pil_img = plot_attention_maps(  # 关键一步：attention / mask 可视化
                     ovam_evaluator,
                     word_embd,
-                    init_embd,  # was incorrectly giving embedding here
+                    init_embd,  # 未训练的token
                     opt_embedding,
                     image,
                     TEXT,
@@ -1021,15 +1031,15 @@ def generate_images(
                     device,
                     decoded_full_idx=decoded_full_idx,
                     _selected_masks=_selected_masks,
-                    set_titles=_iidx == 0,  # only on first image add text above
-                    _opt_text=_v,  # which file was used for opt
+                    set_titles=_iidx == 0,  # 只在第一张图片上面添加文字
+                    _opt_text=_v,  # 哪个文件用于opt
                     _first_text="Inverted Image",
                     return_preds=return_preds,
                 )
 
                #  optimized_map = extract_opt_masks(opt_embedding, ovam_evaluator, device)[[0, 1]]
 
-            if isinstance(pil_img, tuple):
+            if isinstance(pil_img, tuple):  # 可选：返回定量指标,用于训练后定量评估
                 pil_img, loss_values = (
                     pil_img  # pil_img, torch.stack([non_optimized_map, optimized_map, non_optimized_avg])
                 )
@@ -1041,20 +1051,20 @@ def generate_images(
         elif len(imgs) == 1:
             combined_img = imgs[0]
         else:
-            combined_img = combine_pil_vertically(
+            combined_img = combine_pil_vertically(  # 多图合并展示
                 imgs[0],
                 ToPILImage()(
                     make_grid([ToTensor()(a) for a in imgs[1:]], nrow=1, padding=0)
                 ),
             )
-        # return images to cpu
+        # 将图像返回到CPU
         example_imgs = example_imgs.cpu()
         if return_preds:  # in theory should unify, but left for now
             return combined_img, torch.stack(preds)
         return combined_img
 
 
-# This was meant for loss calculation after the fact
+# 这是为了事后计算损失
 @torch.no_grad()
 def calculate_loss(
     loss_type: str, masks, targets, apply_min_max: bool = True, eps=1e-8

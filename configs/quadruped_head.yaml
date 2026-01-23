@@ -1,21 +1,21 @@
-hf_id: "Aleksandar/partedit_parts"
+hf_id: "Aleksandar/partedit_parts" # 从数据集中加载图像和对应部件掩码
 train_split: "train"
 val_split: "val"
-class_name: "quadruped_head"  # Options: biped_foot, biped_head, quadruped_head, etc.
-TEXT: "Quadruped Head"
-TEXT_INIT: "head"
+class_name: "quadruped_head"  # 训练“动物头部”这一类的区域
+TEXT: "Quadruped Head"  # 要学习优化的目标语义token
+TEXT_INIT: "head" # 初始时，用已有的head token作为起点
 resize: 1024
 batch_size_io: 64
 num_workers: 4
-n_epochs: 2000
-initial_lr: 30.0
+n_epochs: 2000  # embedding的优化迭代次数
+initial_lr: 30.0  # embedding的学习率
 strength: 0.25
 guidance_scale: 7.5
 gamma: 0.7
 step_size: 80
 loss_type: "l2"
 optimizer: "adam"
-save_dir: "runs/quadruped_head/1"
+save_dir: "./runs/quadruped_head/1"
 use_SDXL: true
 use_fp16: false
 log_file: "run.log"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-/ 如果需要修改CUDA设备号，可以使用device = torch.device("cuda:1")指定CUDA设备号
 import os
 import sys
 import yaml
@@ -78,7 +78,7 @@ def run_training(
     example_imgs_test: torch.Tensor,
     example_masks_test: torch.Tensor,
     device: Union[str, torch.device],
-    # Hyperparameters below
+    # Hyperparameters below、下面是超参数
     cur_idx: list[int],
     init_seed: int = 0,
     strength: float = 0.25,
@@ -86,7 +86,7 @@ def run_training(
     TEXT="Quadruped Head",
     TEXT_INIT="Head",
     init_embed_format="N{}_0.pt",  # "N{}_{runidx}.pt",
-    # decoded_full_idx: int = 3,  # Change this based on TEXT
+    # decoded_full_idx: int = 3,  # 根据TEXT更改此值
     gamma=0.7,
     step_size: int = 80,  # StepLR step
     initial_lr: float = 3000,
@@ -97,7 +97,7 @@ def run_training(
     dtype=torch.float32,
     start_strategy: str = "random",  # random, token, token_random
     dataset_name: str = "not provided",  # added for logging purposes
-    N_train: int = 100,  # added for logging purposes
+    N_train: int = 100,  # added for logging purposes/为日志目的添加
     N_test: int = 50,  # added for logging purposes
     optimizer: str = "adam",
     subset_steps: int = 0,
@@ -139,20 +139,21 @@ def run_training(
 
     """
     assert save_dir != "", f"Please provide a non empty path, got {save_dir=}"
-    # create save_dir location
+    # 创建save_dir位置
     os.makedirs(save_dir, exist_ok=True)
     _N = len(cur_idx)
     _log_name = init_embed_format.format(_N).split(".")[0]
     embed_format = f"{save_dir}/{init_embed_format}"  # should leave {}
-    # write a json file with all the hyperparams used to make this training
+    # 编写一个json文件，其中包含用于进行此训练的所有超参数
     embed_format_half = f"{save_dir}/half{n_epochs//2}_{init_embed_format}"  # should leave {}
+    # 找到要训练的token--只训练TEXT对应的token，/process_text()来自于main_logic.py
     _embedding, decoded_str = (
         process_text(
             pipeI2I,
             TEXT
         )
     )
-    # We get index of TEXT_INIT
+    # 我们得到TEXT_INIT的索引
     decoded_full_idx = [i for i, x in enumerate(decoded_str) if x == TEXT_INIT.lower()]
     if len(decoded_full_idx) == 0:
         msg = f"Could not find {TEXT_INIT=} in {decoded_str=}, using {decoded_str[-2]}"
@@ -163,7 +164,7 @@ def run_training(
         decoded_full_idx = -2
     else:
         decoded_full_idx = decoded_full_idx[0]
-    if not os.path.exists(f"{save_dir}/hyperparameters.json"):
+    if not os.path.exists(f"{save_dir}/hyperparameters.json"):  # 实验记录初始化（非训练核心，但很关键）
         with open(f"{save_dir}/hyperparameters.json", "w") as f:
             json.dump(
                 {
@@ -206,8 +207,9 @@ def run_training(
         subset = None if len(subset) == 0 else subset
     use_SDXL = "XL" in pipeI2I.__class__.__name__
     # expand_sizes = (1024, 1024) if use_SDXL else (512, 512)
+    # 注意力钩子，看Attention，注意力监督训练。训练信号来自这些层的 cross-attention map
     hooker_kwargs = {
-        "daam_module_class": StableDiffusionXLDAAM if use_SDXL else StableDiffusionDAAM,
+        "daam_module_class": StableDiffusionXLDAAM if use_SDXL else StableDiffusionDAAM,    # 使用 DAAM,是否可以换成其他版本的扩散模型
         "block_hooker_kwargs": {
             "subset":subset,
         },
@@ -238,15 +240,17 @@ def run_training(
     ] # SDXL
 
     if "locator_kwargs" not in hooker_kwargs or hooker_kwargs["locator_kwargs"] is None:
-        # add "layers" inside
+        # 内部添加 "layers"
         hooker_kwargs["locator_kwargs"] = {"layers": _layers}
     else:
-        # check that we have "layers"
+        # 检查是否有 "layers"
         if "layers" not in hooker_kwargs['locator_kwargs']:
             hooker_kwargs["locator_kwargs"].update({"layers": _layers})
-    # update verbose
+    # 更新 verbose
     hooker_kwargs['locator_kwargs'].update({'verbose': True})
 
+    # Mask 处理取出训练样本对应的 GT mask，对齐到 attention 分辨率，最终作为 监督信号
+    # prepare_masks()和prepare_idx()<-main_logic.py
     _selected_masks, selected_masks = prepare_masks(
         example_masks, cur_idx
     )
@@ -257,13 +261,14 @@ def run_training(
         len(decoded_str) - 1 >= decoded_full_idx
     ), f"{decoded_full_idx=} should corespond to options [{_options}]"
 
+    # embedding 初始化（训练起点）/get_init_embedding()<-main_logic.py
     init_embedding, _clone_init = get_init_embedding(
         start_strategy, pipeI2I, _embedding, -1, device
     )
     
     print(f"Using {start_strategy=} initialization")
     with torch.autocast(device_type="cuda", enabled=True):
-        # Initial forward pass
+        # 初始前向传播（非常关键，但不训练）/initial_forwardpass()<-main_logic.py
         evaluator, img_pil = initial_forwardpass(
             pipeI2I,
             example_imgs_in.to(device),
@@ -274,15 +279,16 @@ def run_training(
             prompt=prompt,
             expand_size=(expand_size, expand_size),
             hooker_kwargs=hooker_kwargs,
-            no_grad_context=True,  # Note(Alex): Pretty sure it will just speedup
+            no_grad_context=True,  # Note(Alex): 这一步没有任何梯度计算，确定会加速Pretty sure it will just speedup
             verbose=True
         )
-    # Move the model before training
+    # 训练之前移动模型，为什么要移动到cpu上？
+    # 接下来的训练只优化 embedding，不需要UNet,VAE,text Encoder。是个显存优化策略
     pipeI2I.to("cpu")
     gc.collect()
     torch.cuda.empty_cache()
 
-    # we need to cast back to full precision the evaluator
+    # 我们需要将评估器(evaluator)转换回全精度
     if dtype == torch.float32:
         msg = "Upcasting EVALUATOR"
         if logger:
@@ -292,7 +298,7 @@ def run_training(
             evaluator, device, offload_text=True, upcast=True
         )
 
-    # Train embedding
+    # 核心训练阶段：opt_embedding是TEXT_INIT 对应 token 的 embedding，具体的函数看main_logic.py文件
     trained_new, opt_embedding, _half, my_callback = train_embedding(
         init_embedding=init_embedding,
         double_target=selected_masks,
@@ -307,6 +313,7 @@ def run_training(
         optimizer=optimizer,
     )
 
+    # embedding 保存（训练痕迹的核心）
     trained_new, _, _ = save_opt_embedding(
         opt_embedding=opt_embedding,
         trained_new=trained_new,
@@ -321,21 +328,22 @@ def run_training(
         file_save=embed_format_half,
     )
     
-    # Plot metrics
+    # Plot 指标
     my_callback.plot_metrics(loss_type).save(f"{save_dir}/metrics_{_log_name}.png")
     # evaluator = move_to_gpu(evaluator, torch.device('cpu'),
     #                         offload_text=False, upcast=False)
-    # Actually we don't need it anymore
+    # 实际上我们不再需要它了
     del evaluator
     gc.collect()
     torch.cuda.empty_cache()
-    pipeI2I.to(device)  # Move back to device
-    # Generate images and save losses for training data
+    pipeI2I.to(device)  # 回到设备
+    # 生成图像并保存训练数据的损失
     opt_embd, _v = load_embd(_N, embed_format=embed_format)
 
-    # Change verbos for inference
+    # 改变 verbos 用于推理
     hooker_kwargs['locator_kwargs'].update({'verbose': False})
 
+    # 生成图像并保存训练数据的损失
     rimg, _ = generate_images(
         opt_embedding=opt_embd,
         init_embd=_clone_init,
@@ -343,7 +351,7 @@ def run_training(
         init_seed=init_seed,
         strength=strength,
         guidance_scale=guidance_scale,
-        img_indices=cur_idx,  # Essentially train
+        img_indices=cur_idx,  # 实质的 train
         decoded_full_idx=decoded_full_idx,  # Head
         example_imgs=example_imgs,
         example_masks=example_masks,
@@ -362,7 +370,7 @@ def run_training(
     gc.collect()
     torch.cuda.empty_cache()
 
-    # Generate images and save losses for testing data
+    # 生成图像并保存测试数据的损失
     rimg_test, _ = generate_images(
         opt_embedding=opt_embd,
         init_embd=_clone_init,
@@ -390,23 +398,23 @@ def run_training(
 
 
 
-# ============ Reproducibility helpers ============
+# ============ Reproducibility helpers ============、帮助复现。尽可能把所有“可控的随机源”锁死。
 
 def set_global_seed(seed: int):
-    if seed is None:
+    if seed is None:    # 如果不关心复现性，可以直接跳过
         return
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    random.seed(seed)   # 随机数
+    np.random.seed(seed)    # Numpy随机数
+    torch.manual_seed(seed) # PyTorch CPU 随机数，影响embedding初始化
+    torch.cuda.manual_seed_all(seed)    # Pytorch GPU 随机数
 
-    # (Optional) Make cudnn deterministic for bitwise reproducibility.
-    # NOTE: This can slow things down. Set via flag if you want it optional.
+    # (Optional) Make cudnn deterministic for bitwise reproducibility./使cudn具有确定性以实现位的可重复性
+    # NOTE: This can slow things down. Set via flag if you want it optional./这会让事情慢下来。如果你想让它是可选的，可以设置via flag
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
 
-# ============ IO batching → full-split concat (preserve old semantics) ============
+# ============ IO batching → full-split concat (preserve old semantics) ============整个训练集一次性加载到内存，并作为“整体监督信号”来优化一个 embedding。
 
 def stack_full_split(loader: DataLoader) -> Tuple[torch.Tensor, torch.Tensor]:
     imgs, masks = [], []
@@ -416,26 +424,26 @@ def stack_full_split(loader: DataLoader) -> Tuple[torch.Tensor, torch.Tensor]:
     return torch.cat(imgs, dim=0), torch.cat(masks, dim=0)
 
 
-# ============ TQDM visibility: patch old MyCallback to be loud on stdout ============
+# ============ TQDM visibility: patch old MyCallback to be loud on stdout ============训练可观测性。让 embedding 的训练过程“看得见”，而不是在终端里“假死”。
 
 def patch_tqdm_callback():
     """
     The original MyCallback in main_logic creates a tqdm that can be too quiet.
     We replace it at runtime with a subclass that uses stdout + dynamic width + label.
     """
-    try:
+    try:    # 尝试导入，如果失败就是直接跳过，不影响训练
         import main_logic as ml
         from tqdm import tqdm
         import sys as _sys
 
-        if not hasattr(ml, "MyCallback"):
+        if not hasattr(ml, "MyCallback"):   # 检查是否存在MyCallback
             return  # older variant? nothing to do
 
-        class _PatchedCallback(ml.MyCallback):
+        class _PatchedCallback(ml.MyCallback):  # 自定义一个增强的Callback
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
                 try:
-                    # Close old bar if it exists, then recreate visibly
+                    # Close old bar if it exists, then recreate visibly/如果bar存在就关闭就久的，然后重新创建
                     if hasattr(self, "progress_bar") and self.progress_bar is not None:
                         try:
                             self.progress_bar.close()
@@ -455,14 +463,14 @@ def patch_tqdm_callback():
                         file=_sys.stdout,
                     )
                 except Exception:
-                    # don't break training if tqdm patch fails
+                    # 如果TQDM补丁失败，不要中断训练
                     pass
 
             def __call__(self, epoch, embedding, mask, loss):
-                # Preserve original behavior, then add a clearer description + postfix
+                # 保留原始行为，然后添加更清晰的描述+后缀
                 out = super().__call__(epoch, embedding, mask, loss)
                 try:
-                    self.progress_bar.set_description(f"OVAM train | epoch {epoch+1}")
+                    self.progress_bar.set_description(f"OVAM train | epoch {epoch+1}")  # 显示当前epoch
                     # Some variants store last loss in self.loss or self.l2; support both
                     last = None
                     if hasattr(self, "loss") and len(self.loss) > 0:
@@ -472,7 +480,7 @@ def patch_tqdm_callback():
                         last = float(self.l2[-1])
                         first = float(self.l2[0])
                     if last is not None:
-                        self.progress_bar.set_postfix({
+                        self.progress_bar.set_postfix({ # 显示当前的loss
                             "l": f"{last:.3g}",
                             "~l": f"{last - first:.3g}"
                         })
@@ -480,13 +488,13 @@ def patch_tqdm_callback():
                     pass
                 return out
 
-        ml.MyCallback = _PatchedCallback
+        ml.MyCallback = _PatchedCallback    # 替换原有Callback
     except Exception:
-        # Keep training even if we cannot patch (safe fallback)
+        # 即使我们不能打补丁，也要继续训练（安全回退）
         pass
 
 
-# ============ CLI ============
+# ============ CLI ============解析命令行参数
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser("Legacy unified (old stack) – HF dataset")
@@ -527,83 +535,85 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main():
+    # 训练超参数的“全集定义”
     p = build_parser()
 
-    # Phase 1: partial parse for YAML
-    args, _ = p.parse_known_args()
+    # 阶段1：对YAML进行部分解析
+    args, _ = p.parse_known_args()  # 只解析当前命令行中“解析器已知的参数”，也就是传入的config参数
     if args.config is not None:
-        with open(args.config, "r") as f:
+        with open(args.config, "r") as f: # 读取 YAML 文件
             cfg = yaml.safe_load(f) or {}
-        # Set defaults from YAML; CLI overrides YAML; YAML overrides parser defaults
+        # 从YAML设置默认值；CLI覆盖YAML；YAML覆盖解析器默认值
         for k, v in cfg.items():
             if f"--{k}" not in sys.argv:
                 p.set_defaults(**{k: v})
 
-    # Phase 2: final parse
-    args = p.parse_args()
+    # 阶段2：最终解析
+    args = p.parse_args()   # 训练所需的参数全部定型
 
-    # Validate required arguments
+    # 验证所需参数，验证要优化的token（TEXT）是否被传入，优化之后要保存的路径（save_dir）是否被传入
     if args.TEXT is None:
         p.error("--TEXT is required (either via CLI or config file)")
     if args.save_dir is None:
         p.error("--save_dir is required (either via CLI or config file)")
 
-    # Reproducibility
+    # 再现性
     set_global_seed(args.seed)
-    if args.deterministic:
+    if args.deterministic:  # 禁用 cuDNN 的自动算法选择，换取稳定，可复现，但是速度会变慢
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
 
-    # Prepare logging (old dual logger)
+    # 再现性 (old dual logger)，创建保存目录，确保在训练中保存不会失败。
     os.makedirs(args.save_dir, exist_ok=True)
     
+    # 记录模型加载信息，输出到终端和日志文件run.log(来自于参数默认)中
     logger = get_logger(
         level=logging.INFO,
         display_to_terminal=True,
         file_name=os.path.join(args.save_dir, args.log_file) if args.log_file else None
     )
 
-    # Make tqdm visible (safe monkey patch)
+    # 使tqdm可见 (safe monkey patch)，解决“训练在跑，但看起来像卡住了”的问题
     patch_tqdm_callback()
 
-    # Device/dtype
+    # Device/dtype，这里可以选择CUDA的设备号
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dtype = torch.float16 if args.use_fp16 else torch.float32
 
-    # Transforms consistent with SDXL default
+    # 把 HF 数据集里的原始图像和掩码，转换成与 SDXL 期望输入一致的张量格式。
     tfm = T.Compose([
         T.Resize((args.resize, args.resize), interpolation=InterpolationMode.BICUBIC),
         T.ToTensor()
     ])
 
-    # HF datasets
+    # HF 数据集。训练监督信号的来源，为 embedding 训练提供“图像 + 部件掩码”的监督对。
     ds_tr = HFImageMaskDataset(args.hf_id, args.train_split, class_name=args.class_name, transform=tfm)
     ds_va = HFImageMaskDataset(args.hf_id, args.val_split, class_name=args.class_name, transform=tfm)
 
-    # IO batching only (concat afterwards) to keep full-dataset gradients
+    # IO 批处理 (concat 之后) 保持完整的数据集梯度
     dl_tr = DataLoader(ds_tr, batch_size=args.batch_size_io, shuffle=False, num_workers=args.num_workers)
     dl_va = DataLoader(ds_va, batch_size=args.batch_size_io, shuffle=False, num_workers=args.num_workers)
-    example_imgs,  example_masks   = stack_full_split(dl_tr)
+    example_imgs,  example_masks   = stack_full_split(dl_tr)    # 数据准备
     example_imgs_v, example_masks_v= stack_full_split(dl_va)
 
-    # SDXL pipeline (your original loader)
+    # SDXL pipeline (your original loader)，这里加载模型不是为了训练它，而是为了“读取它的 attention 行为”。
     logger.info(f"Loading {'SDXL' if args.use_SDXL else 'SD'} model...")
     pipe = load_model(
         device=device, use_sdxl=args.use_SDXL, torch_dtype=dtype, img2img=True, disable_progress_bar=True
     )
     logger.info("Model loaded successfully")
     
-    # Log timestep information
+    # 日志时间步长信息
     num_inference_steps = 50  # default
-    timesteps, actual_steps = pipe.get_timesteps(num_inference_steps, args.strength, device)
+    timesteps, actual_steps = pipe.get_timesteps(num_inference_steps, args.strength, device)    #记录 diffusion timestep 信息
     logger.info(f"Diffusion timesteps: using {num_inference_steps} steps (strength={args.strength})")
     logger.info(f"Timestep range: {timesteps[0].item()} -> {timesteps[-1].item()}")
     # logger.info(f"Timesteps: {timesteps}")
 
-    # Single-run config (no N_list / Nc)
+    # Single-run config (no N_list / Nc)/定义“哪些样本参与 embedding 训练”
     cur_idx = list(range(len(example_imgs)))
 
-    # Log hyperparameters (like the old code did)
+    # Log hyperparameters (like the old code did)、记录超参数/把“这次 embedding 是怎么训练出来的”永久记录下来。
     hparams = dict(
         TEXT=args.TEXT, TEXT_INIT=args.TEXT_INIT, strength=args.strength, guidance_scale=args.guidance_scale,
         gamma=args.gamma, step_size=args.step_size, initial_lr=args.initial_lr, n_epochs=args.n_epochs,
@@ -647,7 +657,7 @@ def main():
         logger = logger
     )
 
-    # Save minimal metrics (trainer already writes its own artifacts)
+    # 保存最小度量 (trainer already writes its own artifacts)
     with open(os.path.join(args.save_dir, "metrics_unified.json"), "w") as f:
         json.dump(result if isinstance(result, dict) else {"result": str(result)}, f, indent=2)
 
