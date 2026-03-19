@@ -48,13 +48,13 @@ if is_invisible_watermark_available():
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
-try:
+try: # 尝试导入高级编辑管线和调度器
     from diffusers import LEditsPPPipelineStableDiffusionXL, EulerDiscreteScheduler, DDIMScheduler, DPMSolverMultistepScheduler
-except ImportError as e:
+except ImportError as e: # 如果由于diffusers版本较低导入失败，
     logger.error("DPMSolverMultistepScheduler or LEditsPPPipelineStableDiffusionXL not found. Verified on >= 0.29.1")
-    from diffusers import DDIMScheduler, EulerDiscreteScheduler
+    from diffusers import DDIMScheduler, EulerDiscreteScheduler # 降级导入保证最基本的生成和编辑能力
 
-if typing.TYPE_CHECKING:
+if typing.TYPE_CHECKING: # 这些导入仅用于静态类型检查
     from diffusers.callbacks import MultiPipelineCallbacks, PipelineCallback
     from transformers import (
         CLIPTextModel,
@@ -116,7 +116,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
 
     _optional_components = ["feature_extractor", "add_watermarker, safety_checker"]
 
-    # Added back from stable_diffusion_reference.py with safety_check to instantiate the NSFW checker from SD1.5
+    # 从stable_diffusion_reference.py添加了safey_check来实例化SD1.5中的NSFW检查器
     def __init__(
         self,
         vae: AutoencoderKL,
@@ -132,10 +132,10 @@ class PartEditPipeline(StableDiffusionXLPipeline):
         add_watermarker: Optional[bool] = None,
         safety_checker: Optional[StableDiffusionSafetyChecker] = None,
     ):
-        if safety_checker is not None:
+        if safety_checker is not None:  # 判断用户 是否传入 NSFW 检测器，如果没传就跳过。
             assert isinstance(safety_checker, StableDiffusionSafetyChecker), f"Expected safety_checker to be of type StableDiffusionSafetyChecker, got {type(safety_checker)}"
             assert feature_extractor is not None, "Feature Extractor must be present to use the NSFW checker"
-        super().__init__(
+        super().__init__(   # 调用父类（SDXL）的构造函数
             vae=vae,
             text_encoder=text_encoder,
             text_encoder_2=text_encoder_2,
@@ -147,30 +147,32 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             feature_extractor=feature_extractor,
             force_zeros_for_empty_prompt=force_zeros_for_empty_prompt,
             add_watermarker=add_watermarker,
-        )
-        self.register_modules(
+        )   # 到此你拥有一个“完整、可用的 SDXL pipeline”
+        self.register_modules(  # 将 safety_checker 注册到 pipeline 内部，生成之后，pipeline 会自动调用它做 NSFW 检测
             safety_checker=safety_checker,
         )
         # self.warn_once_callback = True
 
-    @staticmethod
+    @staticmethod   # 这是一个静态方法，不依赖类实例（self），可以直接通过类名调用。
     def default_pipeline(device, precision=torch.float16, scheduler_type: str = "euler", load_safety: bool = False) -> Tuple[StableDiffusionXLPipeline, PartEditPipeline]:
-        if scheduler_type.strip().lower() in ["ddim", "editfriendly"]:
-            scheduler = DDIMScheduler.from_pretrained("stabilityai/stable-diffusion-xl-base-1.0", subfolder="scheduler", torch_dtype=precision)  # Edit Friendly DDPM
+        if scheduler_type.strip().lower() in ["ddim", "editfriendly"]:  # 对输入字符串做：去空格，转小写。判断是否是 DDIM / Edit-friendly 模式
+            scheduler = DDIMScheduler.from_pretrained("stabilityai/stable-diffusion-xl-base-1.0", subfolder="scheduler", torch_dtype=precision)  # 从模型中加载DDIM
         elif scheduler_type.strip().lower() in "leditspp":
 
-            scheduler = DPMSolverMultistepScheduler.from_pretrained(
+            scheduler = DPMSolverMultistepScheduler.from_pretrained(    # 构造 SDE-DPM-Solver++，这是 LEdits++ 中使用的调度器
                 "stabilityai/stable-diffusion-xl-base-1.0", subfolder="scheduler", algorithm_type="sde-dpmsolver++", solver_order=2
             )  # LEdits
-        else:
+        else:   # 默认情况下，使用 Euler 离散调度器，速度快，稳定。作为默认推理调度器
             scheduler = EulerDiscreteScheduler.from_pretrained("stabilityai/stable-diffusion-xl-base-1.0", subfolder="scheduler", torch_dtype=precision)
 
+        # 加载VAE
         vae = AutoencoderKL.from_pretrained(
             "madebyollin/sdxl-vae-fp16-fix",
             torch_dtype=precision,
             use_safetensors=True,
             resume_download=None,
         )
+        # 构造“原始 SDXL pipeline”
         default_pipe = StableDiffusionXLPipeline.from_pretrained(
             "stabilityai/stable-diffusion-xl-base-1.0",
             device=device,
@@ -180,6 +182,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             torch_dtype=precision,
         )
 
+        # 是否加载 NSFW 安全模块（可选）
         safety_checker = (
             StableDiffusionSafetyChecker.from_pretrained(
                 "benjamin-paine/stable-diffusion-v1-5",  # runwayml/stable-diffusion-v1-5",
@@ -190,6 +193,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             if load_safety
             else None
         )
+        # 在NSFW开启时，给 safety checker 提供图像特征
         feature_extractor = (
             CLIPImageProcessor.from_pretrained(
                 "benjamin-paine/stable-diffusion-v1-5",  # "runwayml/stable-diffusion-v1-5",
@@ -199,6 +203,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             if load_safety
             else None
         )
+        # 构造 PartEditPipeline（关键）
         pipeline: PartEditPipeline = PartEditPipeline(
             vae=vae,
             tokenizer=default_pipe.tokenizer,
@@ -213,6 +218,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
         )
         return default_pipe.to(device), pipeline.to(device)
 
+    # 输入合法 + PartEdit 编辑条件齐备。
     def check_inputs(
         self,
         prompt,
@@ -229,10 +235,10 @@ class PartEditPipeline(StableDiffusionXLPipeline):
         ip_adapter_image=None,
         ip_adapter_image_embeds=None,
         callback_on_step_end_tensor_inputs=None,
-        # PartEdit stuff
-        embedding_opt: Optional[torch.FloatTensor] = None,
+        # PartEdit 部分
+        embedding_opt: Optional[torch.FloatTensor] = None,  # 用于 token embedding 优化 / 编辑
     ):
-        # Check version of diffusers
+        # 检查diffusers版本
         extra_params = (
             {
                 "ip_adapter_image": ip_adapter_image,
@@ -242,7 +248,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             else {}
         )
 
-        # Use super to check the inputs from the parent class
+        # 使用super来检查来自父类的输入
         super(PartEditPipeline, self).check_inputs(
             prompt,
             prompt_2,
@@ -258,26 +264,27 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             callback_on_step_end_tensor_inputs=callback_on_step_end_tensor_inputs,
             **extra_params,
         )
-        # PartEdit checks
+        # PartEdit 专属：检查 embedding_opt（编辑核心）
         if embedding_opt is not None:
-            assert embedding_opt.ndim == 2, f"Embedding should be of shape (2, features), got {embedding_opt.shape}"
-            assert embedding_opt.shape[-1] == 2048, f"SDXL Embedding should have 2048 features, got {embedding_opt.shape[1]}"
-            assert embedding_opt.dtype in [
+            assert embedding_opt.ndim == 2, f"Embedding should be of shape (2, features), got {embedding_opt.shape}"    # 强制要求 embedding 是二维张量，对应 classifier-free guidance 的双通道 embedding
+            assert embedding_opt.shape[-1] == 2048, f"SDXL Embedding should have 2048 features, got {embedding_opt.shape[1]}"   # SDXL 的 text embedding 维度是 2048
+            assert embedding_opt.dtype in [ # 防止用 int / bf16 / 乱七八糟的 dtype
                 torch.float32,
                 torch.float16,
             ], f"Embedding should be of type fp32/fp16, got {embedding_opt.dtype}"
 
-        assert hasattr(self, "controller"), "Controller should be present"
+        assert hasattr(self, "controller"), "Controller should be present"  # 确保 PartEdit Controller 已正确注入
         assert hasattr(self.controller, "extra_kwargs"), "Controller should have extra_kwargs"
 
+        # 从 controller 中取出：阈值 / 掩码策略。th_strategy 决定：attention → mask 的方式
         extra_kwargs: DotDictExtra = self.controller.extra_kwargs
         strategy: Binarization = extra_kwargs.th_strategy
 
-        assert isinstance(strategy, Binarization), f"Expected strategy to be of type Binarization, got {type(strategy)}"
-        assert hasattr(extra_kwargs, "pad_strategy"), "Controller should have pad_strategy"
+        assert isinstance(strategy, Binarization), f"Expected strategy to be of type Binarization, got {type(strategy)}"    # 防止传入非法字符串 / 数字
+        assert hasattr(extra_kwargs, "pad_strategy"), "Controller should have pad_strategy" # 控制mask是否膨胀，是否做边缘padding
         assert isinstance(extra_kwargs.pad_strategy, PaddingStrategy), f"Expected pad_strategy to be of type PaddingStrategy, got {type(self.controller.extra_kwargs.pad_strategy)}"
 
-        if strategy in [Binarization.PROVIDED_MASK]:
+        if strategy in [Binarization.PROVIDED_MASK]:    # 当策略是“用户提供掩码”时的强校验。外部 mask 编辑模式
             assert hasattr(extra_kwargs, "mask_edit"), "Mask should be present in extra_kwargs"
 
     def _aggregate_and_get_attention_maps_per_token(self, with_softmax, select: int = 0, res: int = 32):
@@ -287,21 +294,21 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             batch_size=self.controller.batch_size,
             is_cross=True,
             select=select,
-        )
-        attention_maps_list = self._get_attention_maps_list(attention_maps=attention_maps, with_softmax=with_softmax)
+        )   # 把 UNet 各层的 cross-attention 全部收集 → 对齐 → 聚合
+        attention_maps_list = self._get_attention_maps_list(attention_maps=attention_maps, with_softmax=with_softmax)   # 拆分成“每个 token 一张图”，见下面函数
         return attention_maps_list
 
     @staticmethod
     def _get_attention_maps_list(attention_maps: torch.Tensor, with_softmax) -> List[torch.Tensor]:
-        attention_maps *= 100
+        attention_maps *= 100   # 放大图
 
-        if with_softmax:
+        if with_softmax:    # 可选 softmax（token 竞争机制）
             attention_maps = torch.nn.functional.softmax(attention_maps, dim=-1)
 
-        attention_maps_list = [attention_maps[:, :, i] for i in range(attention_maps.shape[2])]
+        attention_maps_list = [attention_maps[:, :, i] for i in range(attention_maps.shape[2])] # 这是 PartEdit 能“知道哪个词控制哪块区域”的根源
         return attention_maps_list
 
-    @torch.inference_mode()  # if this gives problems change back to @torch.no_grad()
+    @torch.inference_mode()  # 如果出现问题，请返回@torch.no_grad（）
     def __call__(
         self,
         prompt: Union[str, List[str]],
@@ -338,8 +345,8 @@ class PartEditPipeline(StableDiffusionXLPipeline):
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         # PartEdit
         embedding_opt: Optional[Union[torch.FloatTensor, str]] = None,
-        extra_kwargs: Optional[Union[dict, DotDictExtra]] = None,  # All params, check DotDictExtra
-        uncond_embeds: Optional[torch.FloatTensor] = None,  # Unconditional embeddings from Null text inversion
+        extra_kwargs: Optional[Union[dict, DotDictExtra]] = None,  # 所有参数，检查DotDictExtra
+        uncond_embeds: Optional[torch.FloatTensor] = None,  # 无条件嵌入从空文本反转
         latents_list=None,
         zs=None,
     ):
@@ -419,7 +426,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             `tuple`. When returning a tuple, the first element is a list with the generated images.
         """
 
-        # 0. Default height and width to unet
+        # 0. Default height and width to unet/默认高度和宽度为unet的值
         height = height or self.unet.config.sample_size * self.vae_scale_factor
         width = width or self.unet.config.sample_size * self.vae_scale_factor
 
@@ -427,18 +434,19 @@ class PartEditPipeline(StableDiffusionXLPipeline):
         target_size = target_size or (height, width)
 
         # PartEdit setup
-        extra_kwargs = DotDictExtra() if extra_kwargs is None else DotDictExtra(extra_kwargs)
-        prompt = prompt + [prompt[0]] if prompt[0] != prompt[-1] else prompt  # Add required extra batch if not present
-        extra_kwargs.batch_indx = len(prompt) - 1 if extra_kwargs.batch_indx == -1 else extra_kwargs.batch_indx
+        extra_kwargs = DotDictExtra() if extra_kwargs is None else DotDictExtra(extra_kwargs)   # 把所有编辑参数（阈值、策略、mask 等）统一封装
+        prompt = prompt + [prompt[0]] if prompt[0] != prompt[-1] else prompt  # 构造 “原 prompt + 编辑 prompt”
+        extra_kwargs.batch_indx = len(prompt) - 1 if extra_kwargs.batch_indx == -1 else extra_kwargs.batch_indx # 设置哪个 batch 是“编辑目标”，默认使用最后一个
         add_extra_step = extra_kwargs.add_extra_step
 
         if attn_res is None:
-            attn_res = int(np.ceil(width / 32)), int(np.ceil(height / 32))
+            attn_res = int(np.ceil(width / 32)), int(np.ceil(height / 32))  # Attention 分辨率设置
         self.attn_res = attn_res
         # _prompts = prompt if embedding_opt is None else prompt + [prompt[-1]]
-        if hasattr(self, "controller"):
+        if hasattr(self, "controller"): # 如果之前用过 controller，清空其内部状态
             self.controller.reset()
 
+        # 创建 Attention Controller（核心）
         self.controller = create_controller(
             prompt,
             cross_attention_kwargs,
@@ -448,13 +456,13 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             attn_res=self.attn_res,
             extra_kwargs=extra_kwargs,
         )
-        assert self.controller is not None
+        assert self.controller is not None  # 运行期安全检查
         assert issubclass(type(self.controller), AttentionControl)
-        self.register_attention_control(
+        self.register_attention_control(    
             self.controller,
-        )  # add attention controller
+        )  # 把 controller 挂到 UNet 的 cross-attention 上
 
-        # 1. Check inputs. Raise error if not correct
+        # 1. 校验 prompt / embedding / mask / strategy
         self.check_inputs(
             prompt,
             prompt_2,
@@ -469,7 +477,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             negative_pooled_prompt_embeds,
         )
 
-        # 2. Define call parameters
+        # 确定 batch 数量，用于后面latent/embedding对齐
         if prompt is not None and isinstance(prompt, str):
             batch_size = 1
         elif prompt is not None and isinstance(prompt, list):
@@ -478,14 +486,15 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             batch_size = prompt_embeds.shape[0]
         # batch_size = batch_size + 1 if embedding_opt is not None else batch_size
 
-        device = self._execution_device
-        # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
+        device = self._execution_device # 获取当前 pipeline 使用的设备（cuda）
+        # 此处guidance_scale的定义类似于式(2)中的指导权重w。
         # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
-        # corresponds to doing no classifier free guidance.
-        do_classifier_free_guidance = guidance_scale > 1.0
+        # 对应于不做分类器自由引导.
+        do_classifier_free_guidance = guidance_scale > 1.0  # batch / CFG 判断
 
-        # 3. Encode input prompt
-        text_encoder_lora_scale = cross_attention_kwargs.get("scale", None) if cross_attention_kwargs is not None else None
+        # 3. Encode input prompt 编码图片
+        # 文本到embedding，文本编码（编辑开始介入）
+        text_encoder_lora_scale = cross_attention_kwargs.get("scale", None) if cross_attention_kwargs is not None else None # 若使用 LoRA，读取其 scale
         (
             prompt_embeds,
             negative_prompt_embeds,
@@ -506,11 +515,11 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             lora_scale=text_encoder_lora_scale,
         )
 
-        # 4. Prepare timesteps
+        # 4. 生成扩散反向过程的时间步序列
         self.scheduler.set_timesteps(num_inference_steps, device=device)
         timesteps = self.scheduler.timesteps
 
-        # 5. Prepare latent variables
+        # 5. 准备潜在变量
         num_channels_latents = self.unet.config.in_channels
         latents = self.prepare_latents(
             batch_size * num_images_per_prompt,
@@ -522,12 +531,12 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             generator,
             latents,
         )
-        latents[1] = latents[0]
+        latents[1] = latents[0] # 强制编辑 prompt 和原 prompt 从同一个噪声起点开始
 
-        # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
+        # 6. 准备额外的步骤。TODO:理想情况下，逻辑应该从管道中移出
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
-        # 7. Prepare added time ids & embeddings
+        # 7. /准备添加的时间id和嵌入
         add_text_embeds = pooled_prompt_embeds
         add_time_ids = self._get_add_time_ids(
             original_size,
@@ -546,11 +555,11 @@ class PartEditPipeline(StableDiffusionXLPipeline):
         else:
             negative_add_time_ids = add_time_ids
 
-        # PartEdit:
+        # PartEdit:embedding 修改，会对特定 token embedding 做：替换,padding，对齐
         prompt_embeds = self.process_embeddings(embedding_opt, prompt_embeds, self.controller.pad_strategy)
-        self.prompt_embeds = prompt_embeds
+        self.prompt_embeds = prompt_embeds  # 保存供 controller 使用
 
-        if do_classifier_free_guidance:
+        if do_classifier_free_guidance: # 构造 [uncond, cond] embedding
             _og_prompt_embeds = prompt_embeds.clone()
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
             add_text_embeds = torch.cat([negative_pooled_prompt_embeds, add_text_embeds], dim=0)
@@ -560,7 +569,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
         add_text_embeds = add_text_embeds.to(device)
         add_time_ids = add_time_ids.to(device).repeat(batch_size * num_images_per_prompt, 1)
 
-        # 8. Denoising loop
+        # 8. Denoising loop/去噪循环
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
 
         # 7.1 Apply denoising_end
@@ -569,7 +578,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             num_inference_steps = len(list(filter(lambda ts: ts >= discrete_timestep_cutoff, timesteps)))
             timesteps = timesteps[:num_inference_steps]
         # PartEdit
-        if hasattr(self, "debug_list"):  # if its disabled and there was a list
+        if hasattr(self, "debug_list"):  # 如果它是禁用的，并且有一个列表
             del self.debug_list
         if extra_kwargs.debug_vis:
             self.debug_list = []
@@ -584,12 +593,12 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             for i, t in enumerate(timesteps):
                 # if i in range(50):
                 #     latents[0] = latents_list[i]
-                # expand the latents if we are doing classifier free guidance
+                # 如果我们在做分类器自由引导，就扩展潜在向量
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
 
-                latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+                latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)    # 按 scheduler 要求缩放 latent
 
-                # NOTE(Alex): Null text inversion usage
+                # 注（Alex）： Null text inversion用法
                 if uncond_embeds is not None:
                     # if callback_on_step_end is not None and self.warn_once_callback:
                     #     self.warn_once_callback = False
@@ -601,7 +610,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
                     # if prompt_embeds.shape != (2, 77, 2048):
                     #     print(f"Prompt Embeds should be of shape (2, 77, 2048), got {prompt_embeds.shape}")
 
-                # predict the noise residual
+                # UNet 前向预测噪声
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
@@ -623,13 +632,13 @@ class PartEditPipeline(StableDiffusionXLPipeline):
                     #                   device=noise_pred.device, dtype= noise_pred.dtype).view(-1, 1, 1, 1)
                     # gs[0] = 7.5
                     # our_gs = torch.FloatTensor([1.0, guidance_scale, 1.0]).view(-1, 1, 1, 1).to(latents.device, dtype=latents.dtype)
-                    noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+                    noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond) # CFG 合成最终噪声预测
 
                 if do_classifier_free_guidance and guidance_rescale > 0.0:
                     # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
                     noise_pred = rescale_noise_cfg(noise_pred, noise_pred_text, guidance_rescale=guidance_rescale)
 
-                # compute the previous noisy sample x_t -> x_t-1 # synth
+                # 执行一步扩散反向更新 # synth
                 latents = self.scheduler.step(
                     noise_pred, t, latents, **extra_step_kwargs
                 )
@@ -642,10 +651,10 @@ class PartEditPipeline(StableDiffusionXLPipeline):
 
                 latents = latents.prev_sample  # Needed here because of logging above
 
-                # step callback
+                # 让 controller：更新 attention，控制 mask 生效时间
                 latents = self.controller.step_callback(latents)
 
-                # Note(Alex): Copied from SDXL
+                # 注释（Alex）：从SDXL复制
                 if callback_on_step_end is not None:
                     callback_kwargs = {}
                     for k in callback_on_step_end_tensor_inputs:
@@ -663,40 +672,41 @@ class PartEditPipeline(StableDiffusionXLPipeline):
                     us_dx = 0
                     if i == 0 and us_dx != 0:
                         print(f'Using lantents[{us_dx}] instead of latents[0]')
-                    latents[-1:] = latents[us_dx]  # always tie the diff process
-                # if embedding_opt is not None and callback_on_step_end is not None and \
+                    latents[-1:] = latents[us_dx]  # 总是把困难的过程联系起来
+                # 如果embedding_opt不为None且callback_on_step_end不为None，则 \
                 # callback_on_step_end.reversed_latents is not None:
                 #     latents[-1:] = callback_on_step_end.reversed_latents[i]
 
-                # call the callback, if provided
+                # 如果提供的话，调用回调
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
                     if callback is not None and i % callback_steps == 0:
                         step_idx = i // getattr(self.scheduler, "order", 1)
                         callback(step_idx, t, latents)
 
-        # 8. Post-processing
+        # 8. 后处理
         if output_type == "latent":
             image = latents
         else:
-            self.final_map = self.controller.visualize_final_map(False)
-            # Added to support lower VRAM gpus
+            self.final_map = self.controller.visualize_final_map(False) # 生成最终 attention / mask 可视化
+            # 增加支持更低的VRAM gpu
             self.controller.offload_stores(torch.device("cpu"))
-            image = self.latent2image(latents, device, output_type, force_upcast=False)
+            image = self.latent2image(latents, device, output_type, force_upcast=False) # VAE 解码 latent → image
 
-        # Offload all models
+        # 卸载所有模型
         self.maybe_free_model_hooks()
 
         if not return_dict:
             return image
 
         self.grid = self.visualize_maps()
-        # Disable editing in case of
-        self.unregister_attention_control()
+        # 在以下情况下禁用编辑
+        self.unregister_attention_control() # 移除 attention hook，防止影响下一次推理
 
-        # Did not add NSFW output as it is not part of XLPipelineOuput
+        # 没有添加NSFW输出，因为它不是xlpipelineoutput的一部分
         return StableDiffusionXLPipelineOutput(images=image)
 
+    # 将扩散模型的潜在空间输出（latent）转换为可视化的图像（通过 VAE 解码），并执行后处理（如安全检测、水印和图像标准化）。
     @torch.no_grad()
     def latent2image(
         self: PartEditPipeline,
@@ -705,20 +715,20 @@ class PartEditPipeline(StableDiffusionXLPipeline):
         output_type: str = "pil",  # ['latent', 'pt', 'np', 'pil']
         force_upcast: bool = False,
     ) -> Union[torch.Tensor, np.ndarray, Image.Image]:
-        # make sure the VAE is in float32 mode, as it overflows in float16
+        # 确保VAE处于float32模式，因为它在float16模式下溢出
         needs_upcasting = self.vae.dtype == torch.float16 and self.vae.config.force_upcast or force_upcast
         latents = latents.to(device)
         if needs_upcasting:
             self.upcast_vae()
-        latents = latents.to(next(iter(self.vae.post_quant_conv.parameters())).dtype)
+        latents = latents.to(next(iter(self.vae.post_quant_conv.parameters())).dtype)   # 将 latents 数据转换为 VAE 解码层参数的类型，确保解码过程的数据类型匹配。
 
-        image = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False)[0]
-        # cast back to fp16 if needed
+        image = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False)[0] # 通过 VAE 解码器将 latents 转换为图像。
+        # 如果需要的话，回到fp16
         if needs_upcasting and not force_upcast:
             self.vae.to(dtype=torch.float16)
-        image, has_nsfw_concept = self.run_safety_checker(image, device, latents.dtype)
+        image, has_nsfw_concept = self.run_safety_checker(image, device, latents.dtype) # 对生成的图像进行 NSFW 检查（如成人内容）。
 
-        if has_nsfw_concept is None:
+        if has_nsfw_concept is None:    # 根据 NSFW 检测结果决定是否对图像进行标准化。do_denormalize 表示哪些图像需要恢复为正常的像素范围。
             do_denormalize = [True] * image.shape[0]
         else:
             do_denormalize = [not has_nsfw for has_nsfw in has_nsfw_concept]
@@ -727,7 +737,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
                     "NSFW detected in the following images: %s",
                     ", ".join([f"image {i + 1}" for i, has_nsfw in enumerate(has_nsfw_concept) if has_nsfw]),
                 )
-        if self.watermark is not None:
+        if self.watermark is not None:  # 如果启用了水印功能，将水印应用到图像上。
             image = self.watermark.apply_watermark(image)
         image = self.image_processor.postprocess(image, output_type=output_type, do_denormalize=do_denormalize)
         if output_type in ["pt", "latent"]:
@@ -739,47 +749,48 @@ class PartEditPipeline(StableDiffusionXLPipeline):
         if self.safety_checker is None:
             has_nsfw_concept = None
         else:
-            if torch.is_tensor(image):
+            if torch.is_tensor(image):  # 如果输入图像是 torch.Tensor 类型，则先经过 postprocess 转换为 PIL 图像格式。
                 feature_extractor_input = self.image_processor.postprocess(image, output_type="pil")
-            else:
+            else:   # 如果输入是 numpy.ndarray，则直接通过 numpy_to_pil 转换为 PIL 图像。
                 feature_extractor_input = self.image_processor.numpy_to_pil(image)
-            safety_checker_input = self.feature_extractor(feature_extractor_input, return_tensors="pt").to(device)
+            safety_checker_input = self.feature_extractor(feature_extractor_input, return_tensors="pt").to(device)  # 使用 feature_extractor 提取图像特征，将其转换为 PyTorch tensor 格式，方便传入模型进行处理。
             image, has_nsfw_concept = self.safety_checker(images=image, clip_input=safety_checker_input.pixel_values.to(dtype))
         return image, has_nsfw_concept
 
+    # 在 UNet 中注册并配置注意力（attention）控制器，允许 PartEdit 对扩散模型的 cross-attention 层进行控制。
     def register_attention_control(self, controller):
         attn_procs = {}
         cross_att_count = 0
         self.attn_names = {}  # Name => Idx
-        for name in self.unet.attn_processors:
-            (None if name.endswith("attn1.processor") else self.unet.config.cross_attention_dim)
-            if name.startswith("mid_block"):
+        for name in self.unet.attn_processors:  # 这里开始循环遍历 UNet 中的所有 attention 层。
+            (None if name.endswith("attn1.processor") else self.unet.config.cross_attention_dim)    # 跳过指定的层
+            if name.startswith("mid_block"):    # 判断当前层是否属于 UNet 的中间部分（mid_block）。 
                 self.unet.config.block_out_channels[-1]
                 place_in_unet = "mid"
-            elif name.startswith("up_blocks"):
-                block_id = int(name[len("up_blocks.")])
+            elif name.startswith("up_blocks"):  # 判断当前层是否属于 UNet 的上采样部分（up_blocks）。
+                block_id = int(name[len("up_blocks.")]) # 如果是，那就提取块的编号，
                 list(reversed(self.unet.config.block_out_channels))[block_id]
                 place_in_unet = "up"
-            elif name.startswith("down_blocks"):
+            elif name.startswith("down_blocks"):    # 同理
                 block_id = int(name[len("down_blocks.")])
                 self.unet.config.block_out_channels[block_id]
                 place_in_unet = "down"
             else:
                 continue
-            attn_procs[name] = PartEditCrossAttnProcessor(controller=controller, place_in_unet=place_in_unet)
+            attn_procs[name] = PartEditCrossAttnProcessor(controller=controller, place_in_unet=place_in_unet)   # 创建 PartEditCrossAttnProcessor，下面有具体定义。
             # print(f'{cross_att_count}=>{name}')
-            cross_att_count += 1
+            cross_att_count += 1    # 每添加一个 cross-attention 层，cross_att_count 就加 1，统计需要控制的层数。
 
-        self.unet.set_attn_processor(attn_procs)
-        controller.num_att_layers = cross_att_count
+        self.unet.set_attn_processor(attn_procs)    # 将 attn_procs 传给 self.unet。
+        controller.num_att_layers = cross_att_count # 更新 controller 对象中的 num_att_layers，标记有多少个 attention 层需要控制。
 
     def unregister_attention_control(self):
         # if pytorch >= 2.0
-        self.unet.set_attn_processor(AttnProcessor2_0())
-        if hasattr(self, "controller") and self.controller is not None:
-            if hasattr(self.controller, "last_otsu"):
+        self.unet.set_attn_processor(AttnProcessor2_0())    # 将 UNet 的 attention 处理器恢复为标准的 UNet cross-attention 处理器。
+        if hasattr(self, "controller") and self.controller is not None: # 检查 self 是否具有 controller 属性，且 controller 不为 None。
+            if hasattr(self.controller, "last_otsu"):   # 如果 controller 具有 last_otsu 属性，就将 最后一个 OTSU 阈值保存到 self.last_otsu_value 中。
                 self.last_otsu_value = self.controller.last_otsu[-1]
-            del self.controller
+            del self.controller # 删除 controller 对象，释放内存。
             # self.controller.allow_edit_control = False
 
     def available_params(self) -> str:
@@ -791,7 +802,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             extra_kwargs (`dict`, *optional*): A dictionary with extra parameters to be passed to the pipeline. 
                 - Check `pipe.part_edit_available_params()` for the available parameters.
         """
-
+        # 将 pipeline_params 字符串与 self.part_edit_available_params() 返回的字符串连接起来，形成 完整的参数文档。
         return pipeline_params + "\n" + self.part_edit_available_params()
 
     def process_embeddings(
@@ -803,7 +814,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
         return process_embeddings(embedding_opt, prompt_embeds, padd_strategy)
 
     def part_edit_available_params(self) -> str:
-        return DotDictExtra().explain()
+        return DotDictExtra().explain() # DotDictExtra 是一个对象，它包含了一些额外的参数（例如，PartEdit 专用的参数）。它的 explain() 方法返回该对象的参数说明。
 
     # def run_sa
 
@@ -819,37 +830,38 @@ class PartEditPipeline(StableDiffusionXLPipeline):
 
     def visualize_map_across_time(self):
         """Wrapper function to visualize the same as above, but as one mask"""
-        if hasattr(self, "final_map") and self.final_map is not None:
-            return self.final_map
-        return self.controller.visualize_final_map(self.controller.use_agg_store)
+        if hasattr(self, "final_map") and self.final_map is not None:   # 首先检查 self 是否具有 final_map 属性，且它不为 None。
+            return self.final_map   # self.final_map 存储了之前计算得到的 attention map 或掩码
+        return self.controller.visualize_final_map(self.controller.use_agg_store)   # 如果 final_map 不存在，那么通过控制器来生成最终的 attention map 或掩码。
 
 def process_embeddings(
         embedding_opt: Optional[Union[torch.Tensor, str]],
         prompt_embeds: torch.Tensor,
         padd_strategy: PaddingStrategy,
     ) -> torch.Tensor:
-        if embedding_opt is None:
+        if embedding_opt is None:   # 如果没有传入 embedding_opt，则直接返回 prompt_embeds。
             return prompt_embeds
-        assert isinstance(padd_strategy, PaddingStrategy), f"padd_strategy must be of type PaddingStrategy, got {type(padd_strategy)}"
+        assert isinstance(padd_strategy, PaddingStrategy), f"padd_strategy must be of type PaddingStrategy, got {type(padd_strategy)}"  # 确保传入的 padd_strategy 是 PaddingStrategy 类型
 
-        if isinstance(embedding_opt, str):
+        if isinstance(embedding_opt, str):  # 如果 embedding_opt 是一个文件路径（字符串），根据文件类型（safetensors 或 PyTorch）加载文件。
             embedding_opt = load_file(embedding_opt)["embedding"] if "safetensors" in embedding_opt else torch.load(embedding_opt)
-        elif isinstance(embedding_opt, list):
+        elif isinstance(embedding_opt, list):   # 如果 embedding_opt 是一个文件路径列表，它会循环加载每个文件中的 embedding，并将它们拼接在一起。
             e = [load_file(i)["embedding"] if "safetensors" in i else torch.load(i) for i in embedding_opt]
             embedding_opt = torch.cat(e, dim=0)
             print(f'Embedding Opt shape: {embedding_opt.shape=}')
-        embedding_opt = embedding_opt.to(device=prompt_embeds.device, dtype=prompt_embeds.dtype)
-        if embedding_opt.ndim == 2:
+        embedding_opt = embedding_opt.to(device=prompt_embeds.device, dtype=prompt_embeds.dtype)    # 将 embedding_opt 移动到 prompt_embeds 所在的设备，并确保数据类型匹配。
+        if embedding_opt.ndim == 2: # 如果 embedding_opt 是二维张量（通常是 [batch_size, features]），将其变为三维张量（[1, batch_size, features]），以便能够与 prompt_embeds 正常合并。
             embedding_opt = embedding_opt[None]
         num_embeds = embedding_opt.shape[1] # BG + Num of classes
-        prompt_embeds[-1:, :num_embeds, :] = embedding_opt[:, :num_embeds, :]
+        prompt_embeds[-1:, :num_embeds, :] = embedding_opt[:, :num_embeds, :]   # 将 embedding_opt 的前 num_embeds 维度（即 embedding 的一部分）插入到 prompt_embeds 的最后一行。
 
-        if PaddingStrategy.context == padd_strategy:
+        if PaddingStrategy.context == padd_strategy:    # 如果当前的 padding 策略是 context，则直接返回 prompt_embeds，无需做任何处理
             return prompt_embeds
         if not (hasattr(padd_strategy, "norm") and hasattr(padd_strategy, "scale")):
             raise ValueError(f"PaddingStrategy with {padd_strategy} not recognized")
-        _norm, _scale = padd_strategy.norm, padd_strategy.scale
+        _norm, _scale = padd_strategy.norm, padd_strategy.scale # 检查 padd_strategy 是否具有 norm 和 scale 属性，这两个属性决定了是否对 embedding_opt 进行 归一化 和 缩放。
 
+        # 根据不同的 padding 策略进行具体填充
         if padd_strategy == PaddingStrategy.BG:
             prompt_embeds[-1:, num_embeds:, :] = embedding_opt[:, :1, :]
         elif padd_strategy == PaddingStrategy.EOS:
@@ -860,7 +872,7 @@ def process_embeddings(
             prompt_embeds[-1:, num_embeds:, :] = prompt_embeds[-1:, :1, :]
         else:
             raise ValueError(f"{padd_strategy} not recognized")
-        # Not recommended
+        # 不推荐
         if _norm:
             prompt_embeds[-1:, :, :] = F.normalize(prompt_embeds[-1:, :, :], p=2, dim=-1)
         if _scale:
@@ -877,7 +889,7 @@ def process_embeddings(
                 prompt_embeds[-1:, num_embeds:, :] = prompt_embeds[-1:, num_embeds:, :] * (_max - _min + _eps) + _min
         return prompt_embeds
 
-# Depends on layers used to train with
+# 取决于训练时使用的层
 LAYERS_TO_USE = [
     24,
     25,
@@ -922,6 +934,7 @@ LAYERS_TO_USE = [
 ]  # noqa: E501
 
 
+# 它定义了 PartEdit 中“如何把注意力图（attention map）变成可用掩码”的策略集合。
 class Binarization(Enum):
     """Controls the binarization of attn maps
     in case of use_otsu lower_binarize and upper_binarizer are multilpiers of otsu threshold
@@ -941,6 +954,7 @@ class Binarization(Enum):
     PARTEDIT = "partedit", True, 0.5, 1.5, True
     DISABLED = "disabled", False, 0.5, 0.5, False
 
+    # 让每一个枚举值，不只是一个字符串，而是一个“带属性的对象”
     def __new__(
         cls,
         strategy: str,
@@ -951,16 +965,17 @@ class Binarization(Enum):
     ) -> "Binarization":
         obj = object.__new__(cls)
         obj._value_ = strategy
-        obj.enabled = enabled
+        obj.enabled = enabled   # 这里是给创建的对象绑定额外属性
         obj.lower_binarize = lower_binarize
         obj.upper_binarize = upper_binarize
         obj.use_otsu = use_otsu
-        assert isinstance(obj.enabled, bool), "enabled should be of type bool"
+        assert isinstance(obj.enabled, bool), "enabled should be of type bool"  # 类型检查，防止策略定义错误
         assert isinstance(obj.lower_binarize, float), "lower_binarize should be of type float"
         assert isinstance(obj.upper_binarize, float), "upper_binarize should be of type float"
         assert isinstance(obj.use_otsu, bool), "use_otsu should be of type bool"
         return obj
 
+    # 重写等号
     def __eq__(self, other: Optional[Union[Binarization, str]] = None) -> bool:
         if not other:
             return False
@@ -970,13 +985,13 @@ class Binarization(Enum):
             return self.value.lower() == other.lower()
 
     @staticmethod
-    def available_strategies() -> List[str]:
+    def available_strategies() -> List[str]:    # 返回所有可用策略名称
         return [strategy.name for strategy in Binarization]
 
-    def __str__(self) -> str:
+    def __str__(self) -> str:   # 打印使用
         return f"Binarization: {self.name} (Enabled: {self.enabled} Lower: {self.lower_binarize} Upper: {self.upper_binarize} Otsu: {self.use_otsu})"
 
-    @staticmethod
+    @staticmethod   # 把用户输入的字符串参数，转换成真正的 Binarization 策略对象
     def from_string(
         strategy: str,
         enabled: Optional[bool] = None,
@@ -984,10 +999,10 @@ class Binarization(Enum):
         upper_binarize: Optional[float] = None,
         use_otsu: Optional[bool] = None,
     ) -> Binarization:
-        strategy = strategy.strip().lower()
-        for _strategy in Binarization:
-            if _strategy.name.lower() == strategy:
-                if enabled is not None:
+        strategy = strategy.strip().lower() # 修改输入
+        for _strategy in Binarization:  # 遍历所有策略
+            if _strategy.name.lower() == strategy:  # 匹配
+                if enabled is not None: # 允许冬天修改策略参数
                     _strategy.enabled = enabled
                 if lower_binarize is not None:
                     _strategy.lower_binarize = lower_binarize
@@ -998,11 +1013,11 @@ class Binarization(Enum):
                 return _strategy
         raise ValueError(f"binarization_strategy={strategy} not recognized")
 
-
+# 当 PartEdit 往 prompt embeddings 中插入额外 token embedding 后，其余 token 位应该用什么方式填充，以及是否对填充结果做归一化 / 缩放。
 class PaddingStrategy(Enum):
-    # Default
+    # 默认
     BG = "BG", False, False
-    # Others added just for experimentation reasons
+    # 其他添加只是为了实验
     context = "context", False, False
     EOS = "EoS", False, False
     ZERO = "zero", False, False
@@ -1015,7 +1030,7 @@ class PaddingStrategy(Enum):
         obj.scale = scale
         return obj
 
-    # compare based on value
+    # 按value比较
     def __eq__(self, other: Optional[Union[PaddingStrategy, str]] = None) -> bool:
         if not other:
             return False
@@ -1042,38 +1057,38 @@ class PaddingStrategy(Enum):
                 return strategy
         raise ValueError(f"padd_strategy={strategy} not recognized")
 
-
+# 是一个“带默认值 + 自动解析 + 自动规范化”的配置容器，用来承载并规范 PartEdit 所有 extra_kwargs 参数。
 class DotDictExtra(dict):
     """
     dot.notation access to dictionary attributes
     Holds default values for the extra_kwargs
     """
-
+    # 点访问
     __getattr__ = dict.get
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
 
-    _layers_to_use = LAYERS_TO_USE  # Training parameter, not exposed directly
-    _enable_non_agg_storing = False  # Useful for visualization but very VRAM heavy! ~35GB without offload 14GB with offload
-    _cpu_offload = False  # Lowers VRAM but Slows down drastically, hidden
-    _default = {
+    _layers_to_use = LAYERS_TO_USE  # 训练参数，不直接暴露给用户，类级“隐藏配置参数”
+    _enable_non_agg_storing = False  # 是否保存未聚合 attention，但非常占显存！~35GB无卸载14GB带卸载
+    _cpu_offload = False  # 是否把 attention store 放到 CPU，降低VRAM，但大幅减速，隐藏
+    _default = {    # 默认参数表
         "th_strategy": Binarization.PARTEDIT,
         "pad_strategy": PaddingStrategy.BG,
-        "omega": 1.5,  # values should be between 0.25 and 2.0
+        "omega": 1.5,  # 值应该在0.25到2.0之间  
         "use_agg_store": False,
         "edit_mask": None,
-        "edit_steps": 50, # End at this step
-        "start_editing_at": 0,  # Recommended, but exposed in case of wanting to change
-        "use_layer_subset_idx": None,  # In case we want to use specific layers, NOTE: order not aligned with UNet lаyers
+        "edit_steps": 50, # 在这个时间步结束
+        "start_editing_at": 0,  # 推荐，但是会在想要改变的时候暴露
+        "use_layer_subset_idx": None,  # 以防我们想要使用特定的层, NOTE: 顺序不与Unet层对齐
         "add_extra_step": False,
-        "batch_indx": -1,  # assume last batch
+        "batch_indx": -1,  # 最后一个
         "blend_layers": None,
-        "force_cross_attn": False,  # Force cross attention to maps
-        # Optimization stuff
-        "VRAM_low": True,  # Leave on by default, except if causing erros
+        "force_cross_attn": False,  # 强迫交叉注意力到图
+        # 优化部分
+        "VRAM_low": True,  # 默认情况下保持开启状态，除非会导致错误
         "grounding": None,
     }
-    _default_explanations = {
+    _default_explanations = {   # 参数解释说明表（用于文档）
         "th_strategy": "Binarization strategy for attention maps",
         "pad_strategy": "Padding strategy for the added tokens",
         "omega": "Omega value for the PartEdit",
@@ -1088,21 +1103,21 @@ class DotDictExtra(dict):
     }
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        for key, value in self._default.items():
+        super().__init__(*args, **kwargs)   # 调用 dict 初始化
+        for key, value in self._default.items():    # 注入默认参数
             if key not in self:
                 self[key] = value
 
-        # Extra changes to Binarization, PaddingStrategy
-        if isinstance(self["th_strategy"], str):
+        # 对二值化，填充策略进行了额外的更改
+        if isinstance(self["th_strategy"], str):    # 把字符串策略转成枚举
             self["th_strategy"] = Binarization.from_string(self["th_strategy"])
         if isinstance(self["pad_strategy"], str):
             self["pad_strategy"] = PaddingStrategy.from_string(self["pad_strategy"])
-        self["edit_steps"] = self["edit_steps"] + self["add_extra_step"]
+        self["edit_steps"] = self["edit_steps"] + self["add_extra_step"]    # 时间步对齐
 
         if self.edit_mask is not None :
             if isinstance(self.edit_mask, str):
-                # load with PIL or torch/safetensors
+                # 从PIL or torch/safetensors中加载  
                 if self.edit_mask.endswith(".safetensors"):
                     self.edit_mask = load_file(self.edit_mask)["edit_mask"]
                 elif self.edit_mask.endswith(".pt"):
@@ -1118,7 +1133,7 @@ class DotDictExtra(dict):
             elif self.edit_mask.ndim == 3:
                 self.edit_mask = self.edit_mask[None, ...]
             
-            if self.edit_mask.max() > 1.0:
+            if self.edit_mask.max() > 1.0:# 归一化
                 self.edit_mask = self.edit_mask / self.edit_mask.max()
         if self.grounding is not None: # same as above, but slightly different function
             if isinstance(self.grounding, Image.Image):
@@ -1129,7 +1144,7 @@ class DotDictExtra(dict):
                 self.grounding = self.grounding[None, None, ...]
             elif self.grounding.ndim == 3:
                 self.grounding = self.grounding[None, ...]
-            if self.grounding.max() > 1.0:
+            if self.grounding.max() > 1.0:  
                 self.grounding = self.grounding / self.grounding.max()
 
         assert isinstance(self.th_strategy, Binarization), "th_strategy should be of type Binarization"
@@ -1138,7 +1153,7 @@ class DotDictExtra(dict):
     def th_from_str(self, strategy: str):
         return Binarization.from_string(strategy)
 
-    @staticmethod
+    @staticmethod   # 返回参数说明字符串
     def explain() -> str:
         """Returns a string with all the explanations of the parameters"""
         return "\n".join(
@@ -1149,27 +1164,27 @@ class DotDictExtra(dict):
             ]
         )
 
-
+# 把 attention 从“token/flatten 形式”变成“空间特征图”，做插值，再还原回原来的 attention 形状。
 def pack_interpolate_unpack(att, size, interpolation_mode, unwrap_last_dim=True, rewrap=False):
-    has_last_dim = att.shape[-1] in [77, 1]
-    _last_dim = att.shape[-1]
-    if unwrap_last_dim:
-        if has_last_dim:
-            sq = int(att.shape[-2] ** 0.5)
-            att = att.reshape(att.shape[0], sq, sq, -1).permute(0, 3, 1, 2)  # B x H x W x D => B x D x H x W
-        else:
+    has_last_dim = att.shape[-1] in [77, 1] # 77是CLIPtoken数，判断最后一维是不是“token 维”
+    _last_dim = att.shape[-1]   # 记录 token 维大小
+    if unwrap_last_dim: # 是否展开为二维空间，
+        if has_last_dim:    # 有token维
+            sq = int(att.shape[-2] ** 0.5)  # attention 是 flatten 的 HW。反推空间尺寸
+            att = att.reshape(att.shape[0], sq, sq, -1).permute(0, 3, 1, 2)  # B x HW x D => B x D x H x W
+        else:   # 没有token维，也同样反推。
             sq = int(att.shape[-1] ** 0.5)
             att = att.reshape(*att.shape[:-1], sq, sq)  # B x H x W
-    att = att.unsqueeze(-3)  # add a channel dimension
-    if att.shape[-2:] != size:
-        att, ps = einops.pack(att, "* c h w")
-        att = F.interpolate(
+    att = att.unsqueeze(-3)  # 添加通道尺寸
+    if att.shape[-2:] != size:  # 判断是否需要resize
+        att, ps = einops.pack(att, "* c h w")   # 打包成任意 batch 维
+        att = F.interpolate(    # 对 所有 token / channel 的 attention map，同时resize到目标空间。
             att,
             size=size,
             mode=interpolation_mode,
         )
-        att = torch.stack(einops.unpack(att, ps, "* c h w"))
-    if rewrap:
+        att = torch.stack(einops.unpack(att, ps, "* c h w"))    # 恢复原batch维
+    if rewrap:  # 是否重新 wrap 回 token 形式
         if has_last_dim:
             att = att.reshape(att.shape[0], -1, att.shape[-1] * att.shape[-1], _last_dim)
         else:
@@ -1183,7 +1198,8 @@ def pack_interpolate_unpack(att, size, interpolation_mode, unwrap_last_dim=True,
     # B x N x heads X H x W x  if has_last_dim
     return att
 
-
+# otsu阈值，这里定义otsu阈值
+# 根据图像（或 attention map）的直方图，自适应计算一个能最大化前景/背景类间方差的全局阈值。
 @torch.no_grad()
 def threshold_otsu(image: torch.Tensor = None, nbins=256, hist=None):
     """Return threshold value based on Otsu's method using PyTorch.
@@ -1203,41 +1219,41 @@ def threshold_otsu(image: torch.Tensor = None, nbins=256, hist=None):
         Upper threshold value. All pixels with an intensity higher than
         this value are assumed to be foreground.
     """
-    if image is not None and image.dim() > 2 and image.shape[-1] in (3, 4):
+    if image is not None and image.dim() > 2 and image.shape[-1] in (3, 4): # 检查是否是RGB类型的图片
         raise ValueError(f"threshold_otsu is expected to work correctly only for " f"grayscale images; image shape {image.shape} looks like " f"that of an RGB image.")
-    # Convert nbins to a tensor, on device
+    # 在设备上将bbin转换为张量，将 nbins 放到同一设备
     nbins = torch.tensor(nbins, device=image.device)
 
-    # Check if the image has more than one intensity value; if not, return that value
+    # 检查图像是否常量图像；如果不是，则返回该值
     if image is not None:
         first_pixel = image.view(-1)[0]
         if torch.all(image == first_pixel):
             return first_pixel.item()
-
+    # counts：每个 bin 中的像素数量。bin_centers：每个 bin 的中心值
     counts, bin_centers = _validate_image_histogram(image, hist, nbins)
 
-    # class probabilities for all possible thresholds
+    # 所有可能阈值的类概率
     weight1 = torch.cumsum(counts, dim=0)
     weight2 = torch.cumsum(counts.flip(dims=[0]), dim=0).flip(dims=[0])
-    # class means for all possible thresholds
+    # 所有可能阈值的类均值
     mean1 = torch.cumsum(counts * bin_centers, dim=0) / weight1
     mean2 = (torch.cumsum((counts * bin_centers).flip(dims=[0]), dim=0).flip(dims=[0])) / weight2
 
     # Clip ends to align class 1 and class 2 variables:
     # The last value of ``weight1``/``mean1`` should pair with zero values in
     # ``weight2``/``mean2``, which do not exist.
-    variance12 = weight1[:-1] * weight2[1:] * (mean1[:-1] - mean2[1:]) ** 2
+    variance12 = weight1[:-1] * weight2[1:] * (mean1[:-1] - mean2[1:]) ** 2 # 计算类间方差
 
-    idx = torch.argmax(variance12)
-    threshold = bin_centers[idx]
+    idx = torch.argmax(variance12)  # 选择最大类间方差的阈值
+    threshold = bin_centers[idx]    # 将对应的灰度值就是
 
     return threshold.item()
 
-
+# 校验并构造灰度直方图表示，确保 Otsu 阈值计算阶段始终拿到合法、规范的 counts 和 bin_centers。
 def _validate_image_histogram(image: torch.Tensor, hist, nbins):
     """Helper function to validate and compute histogram if necessary."""
-    if hist is not None:
-        if isinstance(hist, tuple) and len(hist) == 2:
+    if hist is not None:    # 判断是否传入了hist
+        if isinstance(hist, tuple) and len(hist) == 2:  # 如果hist 是 (counts, bin_centers) 形式
             counts, bin_centers = hist
             if not (isinstance(counts, torch.Tensor) and isinstance(bin_centers, torch.Tensor)):
                 counts = torch.tensor(counts)
@@ -1245,7 +1261,7 @@ def _validate_image_histogram(image: torch.Tensor, hist, nbins):
         else:
             counts = torch.tensor(hist)
             bin_centers = torch.linspace(0, 1, len(counts))
-    else:
+    else:# 如果没有传入hist，从image计算
         if image is None:
             raise ValueError("Either image or hist must be provided.")
         image = image.to(torch.float32)
@@ -1254,16 +1270,16 @@ def _validate_image_histogram(image: torch.Tensor, hist, nbins):
 
     return counts, bin_centers
 
-
+# 用于在GPU上统计张量的直方图，返回每个bin的计数和bin边界，作为 Otsu 阈值等算法的输入。
 def histogram(xs: torch.Tensor, bins):
     # Like torch.histogram, but works with cuda
     # https://github.com/pytorch/pytorch/issues/69519#issuecomment-1183866843
     min, max = xs.min(), xs.max()
-    counts = torch.histc(xs, bins, min=min, max=max).to(xs.device)
+    counts = torch.histc(xs, bins, min=min, max=max).to(xs.device)  # 使用 torch.histc 统计直方图
     boundaries = torch.linspace(min, max, bins + 1, device=xs.device)
     return counts, boundaries
 
-
+# 把 UNet 各层、各位置、各 step 的 attention map 汇总成统一空间分辨率的 attention 张量
 # Modification of the original from
 # https://github.com/google/prompt-to-prompt/blob/9c472e44aa1b607da59fea94820f7be9480ec545/prompt-to-prompt_stable.ipynb
 def aggregate_attention(
@@ -1279,28 +1295,28 @@ def aggregate_attention(
     use_layer_subset_idx: list[int] = None,
     use_step_store: bool = False,
 ):
-    out = []
-    attention_maps = attention_store.get_average_attention(use_step_store)
-    num_pixels = res**2
-    for location in from_where:
-        for item in attention_maps[f"{location}_{'cross' if is_cross else 'self'}"]:
+    out = []    # 初始化输出列表
+    attention_maps = attention_store.get_average_attention(use_step_store)  # 从 AttentionStore 中取出 attention
+    num_pixels = res**2 # 计算目标像素数
+    for location in from_where: # 遍历Unet的位置（up,middle,down)
+        for item in attention_maps[f"{location}_{'cross' if is_cross else 'self'}"]:    # 遍历该位置下的所有 attention 层
 
-            if upsample_everything or (use_same_layers_as_train and is_cross):
+            if upsample_everything or (use_same_layers_as_train and is_cross):  # 是否需要插值（空间对齐）
                 item = pack_interpolate_unpack(item, (res, res), "bilinear", rewrap=True)
-            if item.shape[-2] == num_pixels:
-                cross_maps = item.reshape(batch_size, -1, res, res, item.shape[-1])[None]
+            if item.shape[-2] == num_pixels:    # 只保留空间大小正确的 attention
+                cross_maps = item.reshape(batch_size, -1, res, res, item.shape[-1])[None]   # 重排Attention维度
                 out.append(cross_maps)
-    _dim = 0
-    if is_cross and use_same_layers_as_train and train_layers is not None:
+    _dim = 0    # 设定聚合维度
+    if is_cross and use_same_layers_as_train and train_layers is not None:  # 训练层对齐（高级用法）
         out = [out[i] for i in train_layers]
-        if use_layer_subset_idx is not None:  # after correct ordering
+        if use_layer_subset_idx is not None:  # 再次筛选 layer，只用特定深度的 attention
             out = [out[i] for i in use_layer_subset_idx]
 
-    out = torch.cat(out, dim=_dim)
-    if return_all_layers:
+    out = torch.cat(out, dim=_dim)  # 拼接所有 attention
+    if return_all_layers:   # 是否返回所有层
         return out
     else:
-        out = out.sum(_dim) / out.shape[_dim]
+        out = out.sum(_dim) / out.shape[_dim]   # 聚合所有层
     return out
 
 
@@ -1311,17 +1327,19 @@ def min_max_norm(a, _min=None, _max=None, eps=1e-6):
 
 
 # Copied from https://github.com/RoyiRa/prompt-to-prompt-with-sdxl/blob/e579861f06962b697b37f3c6dd4813c2acdd55bd/processors.py#L209
+# 在 latent 空间里，用 cross-attention 生成的空间 mask，只在“与指定词语相关的区域”应用编辑，其余区域保持原样。
 class LocalBlend:
-    def __call__(self, x_t, attention_store):
-        # note that this code works on the latent level!
+    def __call__(self, x_t, attention_store):   # 在 每个 diffusion step 中，用 attention 生成 mask 并应用到 latent
+        # 请注意，此代码在潜在层上工作！
         k = 1
         # maps = attention_store["down_cross"][2:4] + attention_store["up_cross"][:3]
-        # These are the numbers because we want to take layers that are 256 x 256, I think this can be changed to something smarter...
-        # like, get all attentions where thesecond dim is self.attn_res[0] * self.attn_res[1] in up and down cross.
-        # NOTE(Alex): This would require activating saving of the attention maps (change in DotDictExtra _enable_non_agg_storing)
-        # NOTE(Alex): Alternative is to use aggregate masks like in other examples
+        # 这些是数字，因为我们想要取256x256的图层，我认为这可以改变得更聪明一些...
+        # 比如，把所有的注意力放在第二个身上。Attn_res [0] * self。Attn_res[1]在上下交叉。
+        # NOTE(Alex): 这将需要激活注意力图的保存（更改DotDictExtra _enable_non_agg_storage)
+        # NOTE(Alex): 另一种选择是像在其他示例中一样使用聚合掩码
+        # 选择合适分辨率的 attention map
         maps = [m for m in attention_store["down_cross"] + attention_store["mid_cross"] + attention_store["up_cross"] if m.shape[1] == self.attn_res[0] * self.attn_res[1]]
-        maps = [
+        maps = [    # 重塑
             item.reshape(
                 self.alpha_layers.shape[0],
                 -1,
@@ -1332,23 +1350,23 @@ class LocalBlend:
             )
             for item in maps
         ]
-        maps = torch.cat(maps, dim=1)
-        maps = (maps * self.alpha_layers).sum(-1).mean(1)
-        # since alpha_layers is all 0s except where we edit, the product zeroes out all but what we change.
-        # Then, the sum adds the values of the original and what we edit.
-        # Then, we average across dim=1, which is the number of layers.
-        mask = F.max_pool2d(maps, (k * 2 + 1, k * 2 + 1), (1, 1), padding=(k, k))
-        mask = F.interpolate(mask, size=(x_t.shape[2:]))
-        mask = mask / mask.max(2, keepdims=True)[0].max(3, keepdims=True)[0]
-        mask = mask.gt(self.threshold)
+        maps = torch.cat(maps, dim=1)   # 拼接不同层的 attention
+        maps = (maps * self.alpha_layers).sum(-1).mean(1)   # 只保留“被编辑词语”的 attention
+        # 因为alpha_layers除了我们编辑的部分外都是0，所以product将除我们修改的部分外的所有内容归零。
+        # 然后，将原始值和我们编辑的值相加。
+        # 然后，我们取dim=1的平均值，这是层数.
+        mask = F.max_pool2d(maps, (k * 2 + 1, k * 2 + 1), (1, 1), padding=(k, k))   # 局部膨胀（平滑 mask）
+        mask = F.interpolate(mask, size=(x_t.shape[2:]))    # 插值到 latent 分辨率
+        mask = mask / mask.max(2, keepdims=True)[0].max(3, keepdims=True)[0]    # 归一化
+        mask = mask.gt(self.threshold)  # 二值化
 
-        mask = mask[:1] + mask[1:]
+        mask = mask[:1] + mask[1:]  # source + target mask 合并
         mask = mask.to(torch.float16)
-        if mask.shape[0] < x_t.shape[0]:  # PartEdit
-            # concat last mask again
+        if mask.shape[0] < x_t.shape[0]:  # PartEdit 的 batch 对齐补丁
+            # 再次连接最后一个掩码
             mask = torch.cat([mask, mask[-1:]], dim=0)
 
-        # ## NOTE(Alex): this is local blending with the mask
+        # ## NOTE(Alex): 这是与掩码的局部混合
         # assert isinstance(attention_store, AttentionStore), "AttentionStore expected"
         # cur_res = x_t.shape[-1]
 
@@ -1369,10 +1387,10 @@ class LocalBlend:
         # ## END NOTE(Alex): this is local blending with the mask
 
         x_t = x_t[:1] + mask * (x_t - x_t[:1])
-        # The code applies a mask to the image difference between the original and each generated image, effectively retaining only the desired cells.
+        # 代码对原始图像和每个生成的图像之间的图像差异应用掩码，有效地只保留所需的区域
         return x_t
 
-    # NOTE(Alex): Copied over for LocalBlend
+    # NOTE(Alex): 复制到LocalBlend
     def __init__(
         self,
         prompts: List[str],
@@ -1382,17 +1400,17 @@ class LocalBlend:
         threshold=0.3,
         attn_res=None,
     ):
-        self.max_num_words = 77
+        self.max_num_words = 77 # token固定长度=77
         self.attn_res = attn_res
 
         alpha_layers = torch.zeros(len(prompts), 1, 1, 1, 1, self.max_num_words)
-        for i, (prompt, words_) in enumerate(zip(prompts, words)):
+        for i, (prompt, words_) in enumerate(zip(prompts, words)):  # 标记需要编辑的 token
             if isinstance(words_, str):
                 words_ = [words_]
             for word in words_:
                 ind = get_word_inds(prompt, word, tokenizer)
                 alpha_layers[i, :, :, :, :, ind] = 1
-        self.alpha_layers = alpha_layers.to(device)  # a one-hot vector where the 1s are the words we modify (source and target)
+        self.alpha_layers = alpha_layers.to(device)  # 一个单热向量，其中1是我们修改的单词（源和目标）
         self.threshold = threshold
 
 

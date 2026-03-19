@@ -24,7 +24,15 @@ AVAILABLE_TOKENS = list(PART_TOKENS.keys())
 
 # Download examples directly from the huggingface PartEdit-Bench
 # Login using e.g. `huggingface-cli login` or `hf login` if needed.
-bench = load_dataset("Aleksandar/PartEdit-Bench", revision="v1.1", split="synth")
+# bench = load_dataset("Aleksandar/PartEdit-Bench", revision="v1.1", split="synth")
+bench = load_dataset(
+    "parquet",
+    data_files={
+        "synth": "/hxp/zy/PartEdit/PartEdit-Bench/data/synth-00000-of-00001.parquet",
+        "real": "/hxp/zy/PartEdit/PartEdit-Bench/data/real-00000-of-00001.parquet",
+    },
+    split="synth"
+)
 
 use_examples = None  # all with None
 logo = "assets/partedit.png"
@@ -54,12 +62,12 @@ def _save_image_for_download(edited: Union[PIL.Image.Image, np.ndarray, str, Lis
 
 
 def get_example(idx, bench):
-    # [prompt_original, subject, token_cls, edit, "", 50, 7.5, seed, 50]
+    # [prompt_original, subject, part(token_cls), edit, "", 50, 7.5, seed, 50]
     example = bench[idx]
     return [
         example["prompt_original"],
         example["subject"],
-        example["token_cls"],
+        example["part"],   # 现数据集没有 token_cls 字段，换成part字段
         example["edit"],
         "",
         50,
