@@ -73,6 +73,7 @@ class PartEditSDXLModel:
 
     def __init__(self):
         if torch.cuda.is_available():   # 检测当前运行环境是否有可用的 CUDA GPU
+            print(">>> init PartEditSDXLModel")
             self.device = torch.device(f"cuda:{torch.cuda.current_device()}" if torch.cuda.is_available() else "cpu")   # 返回当前 PyTorch 选中的 GPU 编号
             self.sd_pipe, self.partedit_pipe = PartEditPipeline.default_pipeline(self.device)   # 这里调用了stable_diffusion_xl_partedit文件中定义的函数,并返回两个pipeline
         else:
@@ -118,7 +119,7 @@ class PartEditSDXLModel:
         t_e: int = 50,
         n_cross_replace: float = 0.4
     ) -> PIL.Image.Image:
-
+        print(">>> In PartEditSDXLModel edit")
         # 性能检查
         if not torch.cuda.is_available():
             raise RuntimeError("This demo does not work on CPU!")
@@ -127,6 +128,7 @@ class PartEditSDXLModel:
         #     token_path = PART_TOKENS[part]
         # else:
         #     raise ValueError(f"Part `{part}` is not supported!")
+        print(f"part is {part}")
         if part not in PART_NAME_MAP:
             raise ValueError(f"Part `{part}` is not supported!")
 

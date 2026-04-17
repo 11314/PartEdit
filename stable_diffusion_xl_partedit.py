@@ -55,7 +55,7 @@ except ImportError as e: # 如果由于diffusers版本较低导入失败，
     from diffusers import DDIMScheduler, EulerDiscreteScheduler # 降级导入保证最基本的生成和编辑能力
 
 if typing.TYPE_CHECKING: # 这些导入仅用于静态类型检查
-    from diffusers.callbacks import MultiPipelineCallbacks, PipelineCallback
+    from diffusers import MultiPipelineCallbacks, PipelineCallback
     from transformers import (
         CLIPTextModel,
         CLIPTextModelWithProjection,
@@ -156,14 +156,14 @@ class PartEditPipeline(StableDiffusionXLPipeline):
     @staticmethod   # 这是一个静态方法，不依赖类实例（self），可以直接通过类名调用。
     def default_pipeline(device, precision=torch.float16, scheduler_type: str = "euler", load_safety: bool = False) -> Tuple[StableDiffusionXLPipeline, PartEditPipeline]:
         if scheduler_type.strip().lower() in ["ddim", "editfriendly"]:  # 对输入字符串做：去空格，转小写。判断是否是 DDIM / Edit-friendly 模式
-            scheduler = DDIMScheduler.from_pretrained("stabilityai/stable-diffusion-xl-base-1.0", subfolder="scheduler", torch_dtype=precision)  # 从模型中加载DDIM
+            scheduler = DDIMScheduler.from_pretrained("/hxp/zy/pretrain_models/stable-diffusion-xl-base-1.0", subfolder="scheduler", torch_dtype=precision)  # 从模型中加载DDIM
         elif scheduler_type.strip().lower() in "leditspp":
 
             scheduler = DPMSolverMultistepScheduler.from_pretrained(    # 构造 SDE-DPM-Solver++，这是 LEdits++ 中使用的调度器
-                "stabilityai/stable-diffusion-xl-base-1.0", subfolder="scheduler", algorithm_type="sde-dpmsolver++", solver_order=2
+                "/hxp/zy/pretrain_models/stable-diffusion-xl-base-1.0", subfolder="scheduler", algorithm_type="sde-dpmsolver++", solver_order=2
             )  # LEdits
         else:   # 默认情况下，使用 Euler 离散调度器，速度快，稳定。作为默认推理调度器
-            scheduler = EulerDiscreteScheduler.from_pretrained("stabilityai/stable-diffusion-xl-base-1.0", subfolder="scheduler", torch_dtype=precision)
+            scheduler = EulerDiscreteScheduler.from_pretrained("/hxp/zy/pretrain_models/stable-diffusion-xl-base-1.0", subfolder="scheduler", torch_dtype=precision)
 
         # 加载VAE
         vae = AutoencoderKL.from_pretrained(
@@ -174,18 +174,18 @@ class PartEditPipeline(StableDiffusionXLPipeline):
         )
         # 构造“原始 SDXL pipeline”
         default_pipe = StableDiffusionXLPipeline.from_pretrained(
-            "stabilityai/stable-diffusion-xl-base-1.0",
+            "/hxp/zy/pretrain_models/stable-diffusion-xl-base-1.0",
             device=device,
             vae=vae,
             resume_download=None,
-            scheduler=DDIMScheduler.from_pretrained("stabilityai/stable-diffusion-xl-base-1.0", subfolder="scheduler", torch_dtype=precision),
+            scheduler=DDIMScheduler.from_pretrained("/hxp/zy/pretrain_models/stable-diffusion-xl-base-1.0", subfolder="scheduler", torch_dtype=precision),
             torch_dtype=precision,
         )
 
         # 是否加载 NSFW 安全模块（可选）
         safety_checker = (
             StableDiffusionSafetyChecker.from_pretrained(
-                "benjamin-paine/stable-diffusion-v1-5",  # runwayml/stable-diffusion-v1-5",
+                "/hxp/zy/pretrain_models/stable-diffusion-v1-5",  # runwayml/stable-diffusion-v1-5",
                 device_map=device,
                 torch_dtype=precision,
                 subfolder="safety_checker",
@@ -196,7 +196,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
         # 在NSFW开启时，给 safety checker 提供图像特征
         feature_extractor = (
             CLIPImageProcessor.from_pretrained(
-                "benjamin-paine/stable-diffusion-v1-5",  # "runwayml/stable-diffusion-v1-5",
+                "/hxp/zy/pretrain_models/stable-diffusion-v1-5",  # "runwayml/stable-diffusion-v1-5",
                 subfolder="feature_extractor",
                 device_map=device,
             )
@@ -426,6 +426,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             `tuple`. When returning a tuple, the first element is a list with the generated images.
         """
 
+        print(">>> In PartEditPipeline")
         # 0. Default height and width to unet/默认高度和宽度为unet的值
         height = height or self.unet.config.sample_size * self.vae_scale_factor
         width = width or self.unet.config.sample_size * self.vae_scale_factor
@@ -457,7 +458,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             extra_kwargs=extra_kwargs,
         )
         assert self.controller is not None  # 运行期安全检查
-        assert issubclass(type(self.controller), AttentionControl)
+        assert issubclass(type(self.controller), AttentionControl)  # 判断controller的类型是AttentionControl的子类
         self.register_attention_control(    
             self.controller,
         )  # 把 controller 挂到 UNet 的 cross-attention 上
@@ -934,7 +935,7 @@ LAYERS_TO_USE = [
 ]  # noqa: E501
 
 
-# 它定义了 PartEdit 中“如何把注意力图（attention map）变成可用掩码”的策略集合。
+# 它定义了 PartEdit 中“如何把注意力图（attention map）变成可用掩码”的策略集合。,阈值策略
 class Binarization(Enum):
     """Controls the binarization of attn maps
     in case of use_otsu lower_binarize and upper_binarizer are multilpiers of otsu threshold
@@ -1002,7 +1003,7 @@ class Binarization(Enum):
         strategy = strategy.strip().lower() # 修改输入
         for _strategy in Binarization:  # 遍历所有策略
             if _strategy.name.lower() == strategy:  # 匹配
-                if enabled is not None: # 允许冬天修改策略参数
+                if enabled is not None: # 允许修改策略参数
                     _strategy.enabled = enabled
                 if lower_binarize is not None:
                     _strategy.lower_binarize = lower_binarize
@@ -1108,6 +1109,7 @@ class DotDictExtra(dict):
             if key not in self:
                 self[key] = value
 
+        print(">>> init DotDictExtra")
         # 对二值化，填充策略进行了额外的更改
         if isinstance(self["th_strategy"], str):    # 把字符串策略转成枚举
             self["th_strategy"] = Binarization.from_string(self["th_strategy"])
@@ -1330,6 +1332,7 @@ def min_max_norm(a, _min=None, _max=None, eps=1e-6):
 # 在 latent 空间里，用 cross-attention 生成的空间 mask，只在“与指定词语相关的区域”应用编辑，其余区域保持原样。
 class LocalBlend:
     def __call__(self, x_t, attention_store):   # 在 每个 diffusion step 中，用 attention 生成 mask 并应用到 latent
+        print(">>> In LocalBlend")
         # 请注意，此代码在潜在层上工作！
         k = 1
         # maps = attention_store["down_cross"][2:4] + attention_store["up_cross"][:3]
@@ -1337,7 +1340,7 @@ class LocalBlend:
         # 比如，把所有的注意力放在第二个身上。Attn_res [0] * self。Attn_res[1]在上下交叉。
         # NOTE(Alex): 这将需要激活注意力图的保存（更改DotDictExtra _enable_non_agg_storage)
         # NOTE(Alex): 另一种选择是像在其他示例中一样使用聚合掩码
-        # 选择合适分辨率的 attention map
+        # 在下、中、上采样过程中，收集所有层的cross-attention，然后只保留满足空间分辨率
         maps = [m for m in attention_store["down_cross"] + attention_store["mid_cross"] + attention_store["up_cross"] if m.shape[1] == self.attn_res[0] * self.attn_res[1]]
         maps = [    # 重塑
             item.reshape(
@@ -1400,6 +1403,7 @@ class LocalBlend:
         threshold=0.3,
         attn_res=None,
     ):
+        print(">>> init LocalBlend")
         self.max_num_words = 77 # token固定长度=77
         self.attn_res = attn_res
 
@@ -1415,41 +1419,44 @@ class LocalBlend:
 
 
 # Copied from https://github.com/RoyiRa/prompt-to-prompt-with-sdxl/blob/e579861f06962b697b37f3c6dd4813c2acdd55bd/processors.py#L129
+# 定义了一个注意力控制抽象基类，对 attention map 进行干预
 class AttentionControl(abc.ABC):
-    def step_callback(self, x_t):
+    def step_callback(self, x_t):   # 扩散后的回调
         return x_t
 
     def between_steps(self):
         return
 
     @property
-    def num_uncond_att_layers(self):
+    def num_uncond_att_layers(self):    # 前多少层 attention 是 无条件分支
         return 0
 
     @abc.abstractmethod
-    def forward(self, attn, is_cross: bool, place_in_unet: str, store: bool = True):
+    def forward(self, attn, is_cross: bool, place_in_unet: str, store: bool = True):    # 控制注意力的地方
         raise NotImplementedError
 
     def __call__(self, attn, is_cross: bool, place_in_unet: str, store: bool = True):
-        if self.cur_att_layer >= self.num_uncond_att_layers:
-            h = attn.shape[0]
-            attn[h // 2 :] = self.forward(attn[h // 2 :], is_cross, place_in_unet, store)
-        self.cur_att_layer += 1
-        if self.cur_att_layer == self.num_att_layers + self.num_uncond_att_layers:
+        # print(">>> In AttentionControl")
+        if self.cur_att_layer >= self.num_uncond_att_layers:    # 是否当前层 >= uncond层数
+            h = attn.shape[0]   # 获取batch size
+            attn[h // 2 :] = self.forward(attn[h // 2 :], is_cross, place_in_unet, store)   # 只对 conditional 部分做编辑
+        self.cur_att_layer += 1 # 当前层数+1
+        if self.cur_att_layer == self.num_att_layers + self.num_uncond_att_layers:  # 是否当前 step 的所有 attention 层已经走完
             self.cur_att_layer = 0
             self.cur_step += 1
             self.between_steps()
         return attn
 
-    def reset(self):
+    def reset(self):    # 初始化
         self.cur_step = 0
         self.cur_att_layer = 0
         self.allow_edit_control = True
 
-    def __init__(self, attn_res=None, extra_kwargs: DotDictExtra = None):
+    def __init__(self, attn_res=None, extra_kwargs: DotDictExtra = None):   # 初始化参数
         # PartEdit
+        print(">>> init AttentionControl")
         self.extra_kwargs = extra_kwargs
-        self.index_inside_batch = extra_kwargs.get("index_inside_batch", 1) # Default is one in our prior setting!
+        self.index_inside_batch = extra_kwargs.get("index_inside_batch", 1) # 默认值是我们之前设置的1!
         if not isinstance(self.index_inside_batch, list):
             self.index_inside_batch = [self.index_inside_batch]
         self.layers_to_use = extra_kwargs.get("_layers_to_use", LAYERS_TO_USE)  # Training parameter, not exposed directly
@@ -1472,23 +1479,24 @@ class AttentionControl(abc.ABC):
         self.cur_att_layer: int = 0
         self.attn_res: int = attn_res
 
-    def get_maps_agg(self, resized_res, device):
+    def get_maps_agg(self, resized_res, device):    # 用于返回聚合 attention map，默认未实现
         return None
 
-    def _editing_allowed(self):
+    def _editing_allowed(self): # 当前时间步是否允许编辑
         return self.allow_edit_control  # TODO(Alex): Maybe make this only param, instead of unregister attn control?
 
 
 # Copied from https://github.com/RoyiRa/prompt-to-prompt-with-sdxl/blob/e579861f06962b697b37f3c6dd4813c2acdd55bd/processors.py#L166
-class EmptyControl(AttentionControl):
+class EmptyControl(AttentionControl):   # 对上面的AttentionControl进行简单实现，提供一个不改变 attention 的基类实现
     def forward(self, attn, is_cross: bool, place_in_unet: str, store:bool = True):
         return attn
 
 
 # Modified from https://github.com/RoyiRa/prompt-to-prompt-with-sdxl/blob/e579861f06962b697b37f3c6dd4813c2acdd55bd/processors.py#L171
+# 保存Attention，生成空间mask
 class AttentionStore(AttentionControl):
     @staticmethod
-    def get_empty_store():
+    def get_empty_store():  # 初始化容器，存储上中下采样过程中的自注意力和交叉注意力，优化的注意力，和背景注意力
         return {
             "down_cross": [],
             "mid_cross": [],
@@ -1500,32 +1508,32 @@ class AttentionStore(AttentionControl):
             "opt_bg_cross": [],
         }
 
-    def maybe_offload(self, attn_device, attn_dtype):
-        if self.extra_kwargs.get("_cpu_offload", False):
+    def maybe_offload(self, attn_device, attn_dtype):   # 显存优化
+        if self.extra_kwargs.get("_cpu_offload", False):    # 如果开启，把 attention 从 GPU → CPU，并转成 float32（稳定）
             attn_device, attn_dtype = torch.device("cpu"), torch.float32
         return attn_device, attn_dtype
 
     def forward(self, attn, is_cross: bool, place_in_unet: str, store: bool = True):
-        key = f"{place_in_unet}_{'cross' if is_cross else 'self'}"
-        _device, _dtype = self.maybe_offload(attn.device, attn.dtype)
-        if store and self.batch_indx is not None and is_cross:
+        key = f"{place_in_unet}_{'cross' if is_cross else 'self'}"  # 创建key
+        _device, _dtype = self.maybe_offload(attn.device, attn.dtype)   # 存储设备
+        if store and self.batch_indx is not None and is_cross:  # 提取并存储attention
             # We always store for our method
-            _dim = attn.shape[0] // self.num_prompt
+            _dim = attn.shape[0] // self.num_prompt # 计算每个prompt对应的chunk，↓选取第batch_indx个样本，取所有空间位置，选指定token，聚合，转设备
             _val = attn[_dim * self.batch_indx : _dim * (self.batch_indx + 1), ..., self.index_inside_batch].sum(0, keepdim=True).to(_device, _dtype)
-            if _val.shape[-1] != 1:
+            if _val.shape[-1] != 1: # 归一化+token聚合
                 # min_max each -1 seperately
                 _max = _val.max()
-                for i in range(_val.shape[-1]):
+                for i in range(_val.shape[-1]): # 对每个token单独归一化
                     _val[..., i] = min_max_norm(_val[..., i], _max=_max)
-                _val = _val.sum(-1, keepdim=True)
-            self.step_store["opt_cross"].append(_val)
-        if self.extra_kwargs.get("_enable_non_agg_storing", False) and store:
+                _val = _val.sum(-1, keepdim=True)   # 跨token求和
+            self.step_store["opt_cross"].append(_val)   # 存入opt_cross
+        if self.extra_kwargs.get("_enable_non_agg_storing", False) and store:   # 可选存原石attention
             _attn = attn.clone().detach().to(_device, _dtype, non_blocking=True)
             if attn.shape[1] <= 32**2:  # avoid memory overhead
                 self.step_store[key].append(_attn)
         return attn
 
-    def offload_stores(self, device):
+    def offload_stores(self, device):   # 显存释放
         """Created for low VRAM usage, where we want to do this before Decoder"""
         for key in self.step_store:
             self.step_store[key] = [a.to(device) for a in self.step_store[key]]
@@ -1534,8 +1542,8 @@ class AttentionStore(AttentionControl):
         torch.cuda.empty_cache()
 
     @torch.no_grad()
-    def calculate_mask_t_res(self, use_step_store: bool = False):
-        mask_t_res = aggregate_attention(
+    def calculate_mask_t_res(self, use_step_store: bool = False):   # 生成mask
+        mask_t_res = aggregate_attention(   # 输入opt_cross，多层注意力，输出[H,W]
             self,
             res=1024,
             from_where=["opt"],
@@ -1547,33 +1555,33 @@ class AttentionStore(AttentionControl):
             train_layers=self.layers_to_use,
             use_step_store=use_step_store,
             use_layer_subset_idx=self.use_layer_subset_idx,
-        )[..., 0]
+        )[..., 0]   # 取单通道
 
-        strategy: Binarization = self.th_strategy
+        strategy: Binarization = self.th_strategy   # 获取阈值
 
-        mask_t_res = min_max_norm(mask_t_res)
+        mask_t_res = min_max_norm(mask_t_res)   # 归一化
 
         upper_threshold = strategy.upper_binarize
         lower_threshold = strategy.lower_binarize
         use_otsu = strategy.use_otsu
-        tt = threshold_otsu(mask_t_res)  # NOTE(Alex): Moved outside, for Inversion Low confidence region copy
-        if not hasattr(self, "last_otsu") or self.last_otsu == []:
+        tt = threshold_otsu(mask_t_res)  # Otsu阈值
+        if not hasattr(self, "last_otsu") or self.last_otsu == []:  # 判断是否保存历史阈值
             self.last_otsu = [tt]
         else:
             self.last_otsu.append(tt)
-        if use_otsu:
+        if use_otsu:    # 根据策略调整阈值
             upper_threshold, lower_threshold = (
                 tt * upper_threshold,
                 tt * lower_threshold,
             )
 
-        if strategy == Binarization.PARTEDIT:
+        if strategy == Binarization.PARTEDIT:   # 特殊策略
             upper_threshold = self.omega * tt  # Assuming we are not chaning upper in PartEdit
 
-        if strategy in [Binarization.P2P, Binarization.PROVIDED_MASK]:
+        if strategy in [Binarization.P2P, Binarization.PROVIDED_MASK]:  # 不二值化情况
             return mask_t_res
 
-        mask_t_res[mask_t_res < lower_threshold] = 0
+        mask_t_res[mask_t_res < lower_threshold] = 0    # 掩码二值化
         mask_t_res[mask_t_res >= upper_threshold] = 1.0
 
         return mask_t_res
@@ -1581,42 +1589,42 @@ class AttentionStore(AttentionControl):
     def has_maps(self) -> bool:
         return len(self.mask_storage_step) > 0 or len(self.mask_storage_agg) > 0
 
-    def _store_agg_map(self) -> None:
+    def _store_agg_map(self) -> None:   # 存mask
         if self.use_agg_store:
-            self.mask_storage_agg[self.cur_step] = self.calculate_mask_t_res().cpu()
+            self.mask_storage_agg[self.cur_step] = self.calculate_mask_t_res().cpu()    # 跨步累计
         else:
-            self.mask_storage_step[self.cur_step] = self.calculate_mask_t_res(True).cpu()
+            self.mask_storage_step[self.cur_step] = self.calculate_mask_t_res(True).cpu()   # 每步单独
 
     def between_steps(self):
-        no_items = len(self.attention_store) == 0
+        no_items = len(self.attention_store) == 0   # 是否是第一次运行
         if no_items:
-            self.attention_store = self.step_store
+            self.attention_store = self.step_store  # 初始化
         else:
-            for key in self.attention_store:
+            for key in self.attention_store:# 跨step累加
                 for i in range(len(self.attention_store[key])):
                     self.attention_store[key][i] += self.step_store[key][i]
 
-        self._store_agg_map()
+        self._store_agg_map()   # 存mask
         if not no_items:
             # only in this case, otherwise we are just assigning it
             for key in self.step_store:
                 # Clear the list while maintaining the dictionary structure
-                del self.step_store[key][:]
+                del self.step_store[key][:] # 清空step_store
 
-        self.step_store = self.get_empty_store()
+        self.step_store = self.get_empty_store()    # 重建空store
 
-    def get_maps_agg(self, res, device, use_agg_store: bool = None, keepshape: bool = False):
-        if use_agg_store is None:
+    def get_maps_agg(self, res, device, use_agg_store: bool = None, keepshape: bool = False):   # 获取mask
+        if use_agg_store is None:   # 确定使用的哪种store
             use_agg_store = self.use_agg_store
-        _store = self.mask_storage_agg if use_agg_store else self.mask_storage_step
-        last_idx = sorted(_store.keys())[-1]
-        mask_t_res = _store[last_idx].to(device)  # Should be 1 1 H W
-        mask_t_res = F.interpolate(mask_t_res, (res, res), mode="bilinear")
-        if not keepshape:
+        _store = self.mask_storage_agg if use_agg_store else self.mask_storage_step # 确定mask存储来源
+        last_idx = sorted(_store.keys())[-1]    # 取最后一个step
+        mask_t_res = _store[last_idx].to(device)  # Should be 1 1 H W   # 取出对应的mask
+        mask_t_res = F.interpolate(mask_t_res, (res, res), mode="bilinear") # 上采样到分辨率
+        if not keepshape:   # 是否reshape
             mask_t_res = mask_t_res.reshape(1, -1, 1)
         return mask_t_res
 
-    def visualize_maps_agg(self, use_agg_store: bool, make_grid_kwargs: dict = None):
+    def visualize_maps_agg(self, use_agg_store: bool, make_grid_kwargs: dict = None):   # 三个都是将mask转成图片
         _store = self.mask_storage_agg if use_agg_store else self.mask_storage_step
         if make_grid_kwargs is None:
             make_grid_kwargs = {"nrow": 10}
@@ -1638,12 +1646,13 @@ class AttentionStore(AttentionControl):
         _store = self.mask_storage_agg if use_agg_store else self.mask_storage_step
         return ToPILImage()(torch.cat(list(_store.values())).mean(0))
 
+    # 对存储的attention按step做平均
     def get_average_attention(self, step: bool = False):
         _store = self.attention_store if not step else self.step_store
         average_attention = {key: [item / self.cur_step for item in _store[key]] for key in _store}
         return average_attention
 
-    def reset(self):
+    def reset(self):    # 清空运行状态
         super(AttentionStore, self).reset()
         for key in self.step_store:
             del self.step_store[key][:]
@@ -1653,7 +1662,7 @@ class AttentionStore(AttentionControl):
         self.attention_store = {}
         self.last_otsu = []
 
-    def __init__(
+    def __init__(   # 初始化整个数据结构
         self,
         num_prompt: int,
         attn_res=None,
@@ -1661,6 +1670,7 @@ class AttentionStore(AttentionControl):
     ):
         super(AttentionStore, self).__init__(attn_res, extra_kwargs)
 
+        print(">>> init AttentionStore")
         self.num_prompt = num_prompt
         self.mask_storage_step = {}
         self.mask_storage_agg = {}
@@ -1673,58 +1683,58 @@ class AttentionStore(AttentionControl):
 
 # Copied from https://github.com/RoyiRa/prompt-to-prompt-with-sdxl/blob/e579861f06962b697b37f3c6dd4813c2acdd55bd/processors.py#L246
 class AttentionControlEdit(AttentionStore, abc.ABC):
-    def step_callback(self, x_t):
-        if self.local_blend is not None:
+    def step_callback(self, x_t):   # 回调使用
+        if self.local_blend is not None:    # 是否进行局部融合
             # x_t = self.local_blend(x_t, self.attention_store) # TODO: Check if there is more memory efficient way
             x_t = self.local_blend(x_t, self)
         return x_t
 
-    def replace_self_attention(self, attn_base, att_replace):
-        if att_replace.shape[2] <= self.attn_res[0] ** 2:
+    def replace_self_attention(self, attn_base, att_replace):   # 自注意力替换策略
+        if att_replace.shape[2] <= self.attn_res[0] ** 2:   # 判断是否是低分辨率层
             return attn_base.unsqueeze(0).expand(att_replace.shape[0], *attn_base.shape)
         else:
             return att_replace
 
-    @abc.abstractmethod
+    @abc.abstractmethod # 抽象函数是什么？
     def replace_cross_attention(self, attn_base, att_replace):
         raise NotImplementedError
 
     def forward(self, attn, is_cross: bool, place_in_unet: str, store: bool = True):
-        super(AttentionControlEdit, self).forward(attn, is_cross, place_in_unet, store)
-        if is_cross or (self.num_self_replace[0] <= self.cur_step < self.num_self_replace[1]):
-            h = attn.shape[0] // (self.batch_size)
+        super(AttentionControlEdit, self).forward(attn, is_cross, place_in_unet, store) # 先执行父类
+        if is_cross or (self.num_self_replace[0] <= self.cur_step < self.num_self_replace[1]):  # 判断是否需要编辑
+            h = attn.shape[0] // (self.batch_size)  # 计算每个prompt的块大小
             try:
-                attn = attn.reshape(self.batch_size, h, *attn.shape[1:])
-            except RuntimeError as e:
+                attn = attn.reshape(self.batch_size, h, *attn.shape[1:])    # 重塑attn的维度
+            except RuntimeError as e:   # 如果重置失败就打印
                 logger.error(f"Batch size: {self.batch_size}, h: {h}, attn.shape: {attn.shape}")
                 raise e
 
-            attn_base, attn_replace = attn[0], attn[1:]
-            if is_cross:
-                alpha_words = self.cross_replace_alpha[self.cur_step].to(attn_base.device)
-                attn_replace_new = self.replace_cross_attention(attn_base, attn_replace) * alpha_words + (1 - alpha_words) * attn_replace
+            attn_base, attn_replace = attn[0], attn[1:] # 分离base和replace
+            if is_cross:    # 交叉注意力分支
+                alpha_words = self.cross_replace_alpha[self.cur_step].to(attn_base.device)  # 获取alpha
+                attn_replace_new = self.replace_cross_attention(attn_base, attn_replace) * alpha_words + (1 - alpha_words) * attn_replace   # 替换
                 
 
                 attn[1:] = attn_replace_new
-                if self.has_maps() and self.extra_kwargs.get("force_cross_attn", False):  # and self.cur_step <= 51:
-                    mask_t_res = self.get_maps_agg(
+                if self.has_maps() and self.extra_kwargs.get("force_cross_attn", False):  # 强制mask控制
+                    mask_t_res = self.get_maps_agg( # 获取mask
                         res=int(attn_base.shape[1] ** 0.5),
                         device=attn_base.device,
                         use_agg_store=self.use_agg_store,  # Agg is across time, Step is last step without time agg
                         keepshape=False,
-                    ).repeat(h, 1, 1)
-                    zero_index = torch.argmax(torch.eq(self.cross_replace_alpha[0], 0).to(mask_t_res.dtype)).item()
+                    ).repeat(h, 1, 1)   # 扩展到head数
+                    zero_index = torch.argmax(torch.eq(self.cross_replace_alpha[0], 0).to(mask_t_res.dtype)).item() # 找到被替换的token
                     # zero_index = torch.eq(self.cross_replace_alpha[0].flatten(), 0)
-                    mean_curr = attn[1:2, ..., zero_index].mean()
-                    ratio_to_mean = mean_curr / mask_t_res[..., 0].mean()
+                    mean_curr = attn[1:2, ..., zero_index].mean()   # 当前attention均值
+                    ratio_to_mean = mean_curr / mask_t_res[..., 0].mean()   # mask均值
                     # print(f'{ratio_to_mean=}')
-                    extra_mask = torch.where(mask_t_res[..., 0] > self.last_otsu[-1], ratio_to_mean * 2, 0.5)
+                    extra_mask = torch.where(mask_t_res[..., 0] > self.last_otsu[-1], ratio_to_mean * 2, 0.5)   # 构建额外mask
 
-                    attn[1:2, ..., zero_index : zero_index + 1] += mask_t_res[None] * extra_mask[None, ..., None]  # * ratio_to_mean # * 2
+                    attn[1:2, ..., zero_index : zero_index + 1] += mask_t_res[None] * extra_mask[None, ..., None]  # 加到attention上
                     # attn[1:2, ..., zero_index] = (mask_t_res[..., 0][None] > self.last_otsu[-1] * 1.5).to(mask_t_res.dtype) * mean_curr
-            else:
+            else:   # 自注意分支
                 attn[1:] = self.replace_self_attention(attn_base, attn_replace)
-            attn = attn.reshape(self.batch_size * h, *attn.shape[2:])
+            attn = attn.reshape(self.batch_size * h, *attn.shape[2:])   # reshape到原始形状
         return attn
 
     def __init__(
@@ -1744,8 +1754,8 @@ class AttentionControlEdit(AttentionStore, abc.ABC):
             num_prompt=len(prompts),
             extra_kwargs=extra_kwargs,
         )
-        # add tokenizer and device here
-
+        # 在这里添加分词器和设备
+        print(">>> init AttentionControlEdit")
         self.tokenizer = tokenizer
         self.device = device
 
@@ -1758,8 +1768,9 @@ class AttentionControlEdit(AttentionStore, abc.ABC):
 
 
 # Copied from https://github.com/RoyiRa/prompt-to-prompt-with-sdxl/blob/e579861f06962b697b37f3c6dd4813c2acdd55bd/processors.py#L307
+# 具体实现的编辑控制器，用“token映射（mapper）”来替换 cross-attention
 class AttentionReplace(AttentionControlEdit):
-    def replace_cross_attention(self, attn_base, att_replace):
+    def replace_cross_attention(self, attn_base, att_replace):  # 对替换具体实现
         return torch.einsum("hpw,bwn->bhpn", attn_base, self.mapper.to(attn_base.device))
 
     def __init__(
@@ -1785,14 +1796,15 @@ class AttentionReplace(AttentionControlEdit):
             attn_res,
             extra_kwargs,
         )
+        print(">>> init AttentionReplace")
         self.mapper = get_replacement_mapper(prompts, self.tokenizer).to(self.device)
 
 
 # Copied from https://github.com/RoyiRa/prompt-to-prompt-with-sdxl/blob/e579861f06962b697b37f3c6dd4813c2acdd55bd/processors.py#L328
 class AttentionRefine(AttentionControlEdit):
-    def replace_cross_attention(self, attn_base, att_replace):
-        attn_base_replace = attn_base[:, :, self.mapper].permute(2, 0, 1, 3)
-        attn_replace = attn_base_replace * self.alphas + att_replace * (1 - self.alphas)
+    def replace_cross_attention(self, attn_base, att_replace):  # 父类抽象函数的具体实现
+        attn_base_replace = attn_base[:, :, self.mapper].permute(2, 0, 1, 3)    # 使用mapper重排token，按照维度顺序
+        attn_replace = attn_base_replace * self.alphas + att_replace * (1 - self.alphas)    # 融合
         return attn_replace
 
     def __init__(
@@ -1818,17 +1830,19 @@ class AttentionRefine(AttentionControlEdit):
             attn_res,
             extra_kwargs,
         )
+        print(">>> init AttentionRefine")
         self.mapper, alphas = get_refinement_mapper(prompts, self.tokenizer)
         self.mapper, alphas = self.mapper.to(self.device), alphas.to(self.device)
         self.alphas = alphas.reshape(alphas.shape[0], 1, 1, alphas.shape[1])
 
 
 # Copied from https://github.com/RoyiRa/prompt-to-prompt-with-sdxl/blob/e579861f06962b697b37f3c6dd4813c2acdd55bd/processors.py#L353
+# 对token的attention加权，
 class AttentionReweight(AttentionControlEdit):
     def replace_cross_attention(self, attn_base: torch.Tensor, att_replace: torch.Tensor):
-        if self.prev_controller is not None:
+        if self.prev_controller is not None:    # 是否调用签一个controller，链式控制
             attn_base = self.prev_controller.replace_cross_attention(attn_base, att_replace)
-        attn_replace = attn_base[None, :, :, :] * self.equalizer[:, None, None, :]
+        attn_replace = attn_base[None, :, :, :] * self.equalizer[:, None, None, :]  # 加权
         return attn_replace
 
     def __init__(
@@ -1856,77 +1870,81 @@ class AttentionReweight(AttentionControlEdit):
             attn_res,
             extra_kwargs,
         )
-        self.equalizer = equalizer.to(self.device)
-        self.prev_controller = controller
+        print(">>> init AttentionReweight")
+        self.equalizer = equalizer.to(self.device)  # 设置每个prompt的每个token权重 
+        self.prev_controller = controller   # 保存前一个controller
 
 
+# 连接 UNet attention 与 controller
 class PartEditCrossAttnProcessor:
     # Modified from https://github.com/RoyiRa/prompt-to-prompt-with-sdxl/blob/e579861f06962b697b37f3c6dd4813c2acdd55bd/processors.py#L11
-    def __init__(
+    def __init__(   # 初始化
         self,
         controller: AttentionStore,
         place_in_unet,
         store_this_layer: bool = True,
     ):
         super().__init__()
+        # print(">>> init PartEditCrossAttnProcessor")
         self.controller = controller
-        assert issubclass(type(controller), AttentionControl), f"{controller} isn't subclass of AttentionControl"
-        self.place_in_unet = place_in_unet
-        self.store_this_layer = store_this_layer
+        assert issubclass(type(controller), AttentionControl), f"{controller} isn't subclass of AttentionControl"   # 检查controller来源
+        self.place_in_unet = place_in_unet  # 保存层位置
+        self.store_this_layer = store_this_layer    # 是否存储
 
-    def has_maps(self) -> bool:
+    def has_maps(self) -> bool: # 检查是否有mask，(跨step生成，聚合mask，外部提供mask)
         return len(self.controller.mask_storage_step) > 0 or len(self.controller.mask_storage_agg) > 0 or self.controller.edit_mask is not None
 
-    def condition_for_editing(self) -> bool:
+    def condition_for_editing(self) -> bool:    # 是否允许编辑
         # If we have a given mask
         # If we are using PartEdit
         return self.controller.th_strategy.enabled
 
-    def __call__(
+    def __call__(   # UNet attention layer的forward hook
         self,
         attn: Attention,
         hidden_states,
         encoder_hidden_states=None,
         attention_mask=None,
     ):
-        batch_size, sequence_length, _ = hidden_states.shape
-        attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
+        # print(">>> In PartEditCrossAttnProcessor")
+        batch_size, sequence_length, _ = hidden_states.shape    # shape处理
+        attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)   # 标准处理mask
 
-        query = attn.to_q(hidden_states)
+        query = attn.to_q(hidden_states)    # 计算Q
 
-        is_cross = encoder_hidden_states is not None
+        is_cross = encoder_hidden_states is not None    # 是否是交叉注意力
         encoder_hidden_states = encoder_hidden_states if encoder_hidden_states is not None else hidden_states
-        key = attn.to_k(encoder_hidden_states)
+        key = attn.to_k(encoder_hidden_states)  # K和V
         value = attn.to_v(encoder_hidden_states)
 
         # initial_condition = hasattr(self, "controller") and hasattr(self.controller, "batch_indx") and batch_size > self.controller.batch_size
 
-        if hasattr(self, "controller") and self.controller._editing_allowed() and self.controller.batch_indx > 0:
+        if hasattr(self, "controller") and self.controller._editing_allowed() and self.controller.batch_indx > 0:   # batch对齐
             # Set the negative/positive of the batch index to the zero image
             batch_indx = self.controller.batch_indx
-            _bs = self.controller.batch_size
-            query[[batch_indx, batch_indx + _bs]] = query[[0, _bs]]
+            _bs = self.controller.batch_size    # prompt数量
+            query[[batch_indx, batch_indx + _bs]] = query[[0, _bs]] # 把编辑样本的Q替换为原始样本的Q
             # value[[batch_indx, batch_indx+_bs]] = value[[0, _bs]]
 
-        query = attn.head_to_batch_dim(query)
+        query = attn.head_to_batch_dim(query)   # 将这是三个reshape到multi-head格式
         key = attn.head_to_batch_dim(key)
         value = attn.head_to_batch_dim(value)
 
-        attention_probs = attn.get_attention_scores(query, key, attention_mask)
+        attention_probs = attn.get_attention_scores(query, key, attention_mask) # 计算attention
 
-        self.controller(attention_probs, is_cross, self.place_in_unet, self.store_this_layer)
+        self.controller(attention_probs, is_cross, self.place_in_unet, self.store_this_layer)   # 调用controller
 
-        hidden_states = torch.bmm(attention_probs, value)
+        hidden_states = torch.bmm(attention_probs, value)   # attention * v
         hidden_states = attn.batch_to_head_dim(hidden_states)
 
         # linear proj
-        hidden_states = attn.to_out[0](hidden_states)
+        hidden_states = attn.to_out[0](hidden_states)   # 线性投影
         # dropout
         hidden_states = attn.to_out[1](hidden_states)
 
-        res = int(np.sqrt(hidden_states.shape[1]))
+        res = int(np.sqrt(hidden_states.shape[1]))  # 计算空间尺寸
 
-        should_edit = (
+        should_edit = ( # 是否执行Partedit
             hasattr(self, "controller")
             and self.controller._editing_allowed()  # allow_edit_control
             and self.has_maps() 
@@ -1934,30 +1952,30 @@ class PartEditCrossAttnProcessor:
             and self.controller.cur_step > self.controller.start_editing_at
             and self.controller.cur_step < self.controller.edit_steps
         )
-        if should_edit:
-            if self.controller.th_strategy == Binarization.PROVIDED_MASK:
+        if should_edit: # 进入核心
+            if self.controller.th_strategy == Binarization.PROVIDED_MASK:   # 如果用户提供mask
                 mask_t_res = self.controller.edit_mask.to(hidden_states.device)
-                # resize to res
+                # resize to reshape
                 mask_t_res = F.interpolate(mask_t_res, (res, res), mode="bilinear").reshape(1, -1, 1)
-            else:
+            else:   # attention生成mask
                 mask_t_res = self.controller.get_maps_agg(
                     res=res,
                     device=hidden_states.device,
                     use_agg_store=self.controller.use_agg_store,  # Agg is across time, Step is last step without time agg
-                )  # provide in cross_attention_kwargs in pipeline
+                )  # 在cross_attention_kwargs管道中提供
                 # Note: Additional blending with grounding
                 _extra_grounding = self.controller.extra_kwargs.get("grounding", None)
                 if _extra_grounding is not None:
                     mask_t_res = mask_t_res * F.interpolate(_extra_grounding, (res, res), mode="bilinear").reshape(1, -1, 1).to(hidden_states.device)
 
-            # hidden_states_orig = rearrange(hidden_states, "b (h w) c -> b h w c", w=res, h=res)
+            # 核心融合
             b1_u = 0
             b1_c = self.controller.batch_size
             b2_u = 1
             b2_c = self.controller.batch_size + 1
             hidden_states[b2_u] = (1 - mask_t_res) * hidden_states[b1_u] + mask_t_res * hidden_states[b2_u]
             hidden_states[b2_c] = (1 - mask_t_res) * hidden_states[b1_c] + mask_t_res * hidden_states[b2_c]
-            # hidden_states_after = rearrange(hidden_states, "b (h w) c -> b h w c", w=res, h=res)
+            # mask区域使用编辑结果，非mask区域用原始结果
 
         return hidden_states
 
@@ -1972,16 +1990,16 @@ def create_controller(
     attn_res: Tuple[int, int],
     extra_kwargs: dict,
 ) -> AttentionControl:
-    edit_type = cross_attention_kwargs.get("edit_type", "replace")
-    local_blend_words = cross_attention_kwargs.get("local_blend_words")
-    equalizer_words = cross_attention_kwargs.get("equalizer_words")
+    edit_type = cross_attention_kwargs.get("edit_type", "replace")  # 从字典里取编辑类型
+    local_blend_words = cross_attention_kwargs.get("local_blend_words") # 是否局部编辑
+    equalizer_words = cross_attention_kwargs.get("equalizer_words") # 
     equalizer_strengths = cross_attention_kwargs.get("equalizer_strengths")
-    n_cross_replace = cross_attention_kwargs.get("n_cross_replace", 0.4)
+    n_cross_replace = cross_attention_kwargs.get("n_cross_replace", 0.4)    # 注意力替换比例
     n_self_replace = cross_attention_kwargs.get("n_self_replace", 0.4)
 
-    # only replace
+    # 纯替换,用的是这个？
     if edit_type == "replace" and local_blend_words is None:
-        return AttentionReplace(
+        return AttentionReplace(    # 返回一个替换的实例
             prompts,
             num_inference_steps,
             n_cross_replace,
@@ -1992,7 +2010,7 @@ def create_controller(
             extra_kwargs=extra_kwargs,
         )
 
-    # replace + localblend
+    # 局部替换，使用的是这个分支
     if edit_type == "replace" and local_blend_words is not None:
         lb = LocalBlend(
             prompts,
@@ -2013,7 +2031,7 @@ def create_controller(
             extra_kwargs=extra_kwargs,
         )
 
-    # only refine
+    # 仅细化
     if edit_type == "refine" and local_blend_words is None:
         return AttentionRefine(
             prompts,
@@ -2026,7 +2044,7 @@ def create_controller(
             extra_kwargs=extra_kwargs,
         )
 
-    # refine + localblend
+    # 局部+渐进细化
     if edit_type == "refine" and local_blend_words is not None:
         lb = LocalBlend(
             prompts,
@@ -2047,7 +2065,7 @@ def create_controller(
             extra_kwargs=extra_kwargs,
         )
 
-    # only reweight
+    # 权重调整
     if edit_type == "reweight" and local_blend_words is None:
         assert equalizer_words is not None and equalizer_strengths is not None, "To use reweight edit, please specify equalizer_words and equalizer_strengths."
         assert len(equalizer_words) == len(equalizer_strengths), "equalizer_words and equalizer_strengths must be of same length."
@@ -2064,7 +2082,7 @@ def create_controller(
             extra_kwargs=extra_kwargs,
         )
 
-    # reweight and localblend
+    # 调整权重并限制区域
     if edit_type == "reweight" and local_blend_words:
         assert equalizer_words is not None and equalizer_strengths is not None, "To use reweight edit, please specify equalizer_words and equalizer_strengths."
         assert len(equalizer_words) == len(equalizer_strengths), "equalizer_words and equalizer_strengths must be of same length."
@@ -2095,24 +2113,24 @@ def create_controller(
 # Copied from https://github.com/RoyiRa/prompt-to-prompt-with-sdxl/blob/e579861f06962b697b37f3c6dd4813c2acdd55bd/processors.py#L380-L596
 ### util functions for all Edits
 
-
+# 在“时间维度（扩散步）+ 单词维度”上，控制某些词的 attention 何时生效
 def update_alpha_time_word(
     alpha,
     bounds: Union[float, Tuple[float, float]],
     prompt_ind: int,
     word_inds: Optional[torch.Tensor] = None,
 ):
-    if isinstance(bounds, float):
+    if isinstance(bounds, float):   # 判断 bounds 是否是 float
         bounds = 0, bounds
-    start, end = int(bounds[0] * alpha.shape[0]), int(bounds[1] * alpha.shape[0])
-    if word_inds is None:
+    start, end = int(bounds[0] * alpha.shape[0]), int(bounds[1] * alpha.shape[0])   # 计算时间步范围
+    if word_inds is None:   # 如果没有指定词，那就使用全部词
         word_inds = torch.arange(alpha.shape[2])
     alpha[:start, prompt_ind, word_inds] = 0
-    alpha[start:end, prompt_ind, word_inds] = 1
+    alpha[start:end, prompt_ind, word_inds] = 1 # 前部分关闭，中间打开，后部分关闭
     alpha[end:, prompt_ind, word_inds] = 0
     return alpha
 
-
+# 为所有 prompt + 所有词，构建一个完整的“时间-词 attention 控制表（alpha）
 def get_time_words_attention_alpha(
     prompts,
     num_steps,
@@ -2120,72 +2138,74 @@ def get_time_words_attention_alpha(
     tokenizer,
     max_num_words=77,
 ):
-    if not isinstance(cross_replace_steps, dict):
+    if not isinstance(cross_replace_steps, dict):   # 如果不是 dict → 转成 dict
         cross_replace_steps = {"default_": cross_replace_steps}
-    if "default_" not in cross_replace_steps:
+    if "default_" not in cross_replace_steps:   # 如果没有default，补一个
         cross_replace_steps["default_"] = (0.0, 1.0)
-    alpha_time_words = torch.zeros(num_steps + 1, len(prompts) - 1, max_num_words)
-    for i in range(len(prompts) - 1):
+    alpha_time_words = torch.zeros(num_steps + 1, len(prompts) - 1, max_num_words)  # 初始化alpha_tensor
+    for i in range(len(prompts) - 1):   # 第一轮：给所有词应用 default 规则
         alpha_time_words = update_alpha_time_word(alpha_time_words, cross_replace_steps["default_"], i)
-    for key, item in cross_replace_steps.items():
+    for key, item in cross_replace_steps.items():   # 第二轮：对特定词进行覆盖（override）
         if key != "default_":
             inds = [get_word_inds(prompts[i], key, tokenizer) for i in range(1, len(prompts))]
             for i, ind in enumerate(inds):
                 if len(ind) > 0:
                     alpha_time_words = update_alpha_time_word(alpha_time_words, item, i, ind)
-    alpha_time_words = alpha_time_words.reshape(num_steps + 1, len(prompts) - 1, 1, 1, max_num_words)
+    alpha_time_words = alpha_time_words.reshape(num_steps + 1, len(prompts) - 1, 1, 1, max_num_words)   # reshape
     return alpha_time_words
 
 
-### util functions for LocalBlend and ReplacementEdit
+### util函数用于LocalBlend和replacentedit
 def get_word_inds(text: str, word_place: int, tokenizer):
-    split_text = text.split(" ")
-    if isinstance(word_place, str):
-        word_place = [i for i, word in enumerate(split_text) if word_place == word]
-    elif isinstance(word_place, int):
+    split_text = text.split(" ")    # 按空格切分文本
+    if isinstance(word_place, str): # 如果输入的是“词字符串”
+        word_place = [i for i, word in enumerate(split_text) if word_place == word] # 找到这个词在句子中的位置
+    elif isinstance(word_place, int):   # 否则，统一成 list 格式
         word_place = [word_place]
-    out = []
-    if len(word_place) > 0:
-        words_encode = [tokenizer.decode([item]).strip("#") for item in tokenizer.encode(text)][1:-1]
-        cur_len, ptr = 0, 0
+    out = []    # 初始化输出
+    if len(word_place) > 0: # 如果确实找到了词
+        words_encode = [tokenizer.decode([item]).strip("#") for item in tokenizer.encode(text)][1:-1]   # 将一个词拆分成多个 token
+        cur_len, ptr = 0, 0 # 初始化两个指针
 
-        for i in range(len(words_encode)):
-            cur_len += len(words_encode[i])
-            if ptr in word_place:
-                out.append(i + 1)
+        for i in range(len(words_encode)):  # 遍历token
+            cur_len += len(words_encode[i]) # 累加token长度
+            if ptr in word_place:   # 如果当前词是目标词
+                out.append(i + 1)   # 把 token index 加入结果
             if cur_len >= len(split_text[ptr]):
                 ptr += 1
                 cur_len = 0
     return np.array(out)
 
 
-### util functions for ReplacementEdit
+### util函数用于replacementit，构造一个 token-level 映射矩阵（mapper），用来把「原 prompt 的 cross-attention」映射到「新 prompt」
 def get_replacement_mapper_(x: str, y: str, tokenizer, max_len=77):
-    words_x = x.split(" ")
+    words_x = x.split(" ")  # 按空格切词
     words_y = y.split(" ")
-    if len(words_x) != len(words_y):
+    print(f"words_x is {words_x},length is {len(words_x)}")
+    print(f"words_y is {words_y},length is {len(words_y)}")
+    if len(words_x) != len(words_y):    # 检查长度是否一样
         raise ValueError(
             f"attention replacement edit can only be applied on prompts with the same length" f" but prompt A has {len(words_x)} words and prompt B has {len(words_y)} words."
         )
-    inds_replace = [i for i in range(len(words_y)) if words_y[i] != words_x[i]]
-    inds_source = [get_word_inds(x, i, tokenizer) for i in inds_replace]
-    inds_target = [get_word_inds(y, i, tokenizer) for i in inds_replace]
-    mapper = np.zeros((max_len, max_len))
-    i = j = 0
+    inds_replace = [i for i in range(len(words_y)) if words_y[i] != words_x[i]] # 找到哪些位置的词变了
+    inds_source = [get_word_inds(x, i, tokenizer) for i in inds_replace]    # 找到它在 token 级别的位置
+    inds_target = [get_word_inds(y, i, tokenizer) for i in inds_replace]    # 同样
+    mapper = np.zeros((max_len, max_len))   # 初始化 mapper 矩阵
+    i = j = 0   # 初始化指针
     cur_inds = 0
-    while i < max_len and j < max_len:
-        if cur_inds < len(inds_source) and inds_source[cur_inds][0] == i:
-            inds_source_, inds_target_ = inds_source[cur_inds], inds_target[cur_inds]
-            if len(inds_source_) == len(inds_target_):
+    while i < max_len and j < max_len:  # 遍历整个 token 空间
+        if cur_inds < len(inds_source) and inds_source[cur_inds][0] == i:   # 判断当前是否遇到替换词
+            inds_source_, inds_target_ = inds_source[cur_inds], inds_target[cur_inds]   # 取出对应的token
+            if len(inds_source_) == len(inds_target_):  # token相同
                 mapper[inds_source_, inds_target_] = 1
             else:
                 ratio = 1 / len(inds_target_)
                 for i_t in inds_target_:
                     mapper[inds_source_, i_t] = ratio
-            cur_inds += 1
+            cur_inds += 1   # 移动指针
             i += len(inds_source_)
             j += len(inds_target_)
-        elif cur_inds < len(inds_source):
+        elif cur_inds < len(inds_source):   # 如果是没到替换词，那就一一对齐
             mapper[i, j] = 1
             i += 1
             j += 1
@@ -2197,127 +2217,128 @@ def get_replacement_mapper_(x: str, y: str, tokenizer, max_len=77):
     # return torch.from_numpy(mapper).float()
     return torch.from_numpy(mapper).to(torch.float16)
 
-
+# 是对上面函数的批量封装
 def get_replacement_mapper(prompts, tokenizer, max_len=77):
     x_seq = prompts[0]
     mappers = []
-    for i in range(1, len(prompts)):
+    for i in range(1, len(prompts)):    # 遍历所有prompt
         mapper = get_replacement_mapper_(x_seq, prompts[i], tokenizer, max_len)
         mappers.append(mapper)
     return torch.stack(mappers)
 
 
-### util functions for ReweightEdit
+### util函数用于 ReweightEdit，Prompt-to-Prompt 中 reweight（权重调节）模式的核心函数。
 def get_equalizer(
     text: str,
     word_select: Union[int, Tuple[int, ...]],
     values: Union[List[float], Tuple[float, ...]],
     tokenizer,
 ):
-    if isinstance(word_select, (int, str)):
+    if isinstance(word_select, (int, str)): # 统一 word_select 类型
         word_select = (word_select,)
-    equalizer = torch.ones(len(values), 77)
-    values = torch.tensor(values, dtype=torch.float32)
-    for i, word in enumerate(word_select):
-        inds = get_word_inds(text, word, tokenizer)
-        equalizer[:, inds] = torch.FloatTensor(values[i])
+    equalizer = torch.ones(len(values), 77) # 初始化 equalizer
+    values = torch.tensor(values, dtype=torch.float32)  # 把 values 转成 tensor
+    for i, word in enumerate(word_select):  # 遍历每个要调整的词
+        inds = get_word_inds(text, word, tokenizer) # 找到对应的token
+        equalizer[:, inds] = torch.FloatTensor(values[i])   # 赋权重
     return equalizer
 
 
-### util functions for RefinementEdit
+### util函数用于RefinementEdit，定义了一个很小但很典型的评分参数类
 class ScoreParams:
     def __init__(self, gap, match, mismatch):
         self.gap = gap
         self.match = match
         self.mismatch = mismatch
+        print(">>> init ScoreParams")
 
-    def mis_match_char(self, x, y):
+    def mis_match_char(self, x, y): # 字符匹配函数
         if x != y:
             return self.mismatch
         else:
             return self.match
 
-
+# 创建并初始化一个 DP 矩阵的第一行和第一列，用于表示“全是 gap 的情况”
 def get_matrix(size_x, size_y, gap):
-    matrix = np.zeros((size_x + 1, size_y + 1), dtype=np.int32)
-    matrix[0, 1:] = (np.arange(size_y) + 1) * gap
-    matrix[1:, 0] = (np.arange(size_x) + 1) * gap
+    matrix = np.zeros((size_x + 1, size_y + 1), dtype=np.int32) # 创建矩阵
+    matrix[0, 1:] = (np.arange(size_y) + 1) * gap   # 初始化第一行
+    matrix[1:, 0] = (np.arange(size_x) + 1) * gap   # 初始化第一列
     return matrix
 
-
+# 它不是存“分数”，而是存“路径信息”
 def get_traceback_matrix(size_x, size_y):
-    matrix = np.zeros((size_x + 1, size_y + 1), dtype=np.int32)
-    matrix[0, 1:] = 1
+    matrix = np.zeros((size_x + 1, size_y + 1), dtype=np.int32) # 初始化矩阵
+    matrix[0, 1:] = 1   # 初始化行列
     matrix[1:, 0] = 2
-    matrix[0, 0] = 4
+    matrix[0, 0] = 4    # 设置七点
     return matrix
 
 
 def global_align(x, y, score):
-    matrix = get_matrix(len(x), len(y), score.gap)
-    trace_back = get_traceback_matrix(len(x), len(y))
-    for i in range(1, len(x) + 1):
-        for j in range(1, len(y) + 1):
-            left = matrix[i, j - 1] + score.gap
-            up = matrix[i - 1, j] + score.gap
-            diag = matrix[i - 1, j - 1] + score.mis_match_char(x[i - 1], y[j - 1])
-            matrix[i, j] = max(left, up, diag)
-            if matrix[i, j] == left:
+    matrix = get_matrix(len(x), len(y), score.gap)  # 初始化分数矩阵
+    trace_back = get_traceback_matrix(len(x), len(y))   # 初始化回溯矩阵
+    for i in range(1, len(x) + 1):  # 外层循环：遍历 x
+        for j in range(1, len(y) + 1):  # 内层循环：遍历 y
+            left = matrix[i, j - 1] + score.gap # 从左边来（插入）
+            up = matrix[i - 1, j] + score.gap   # 从上边来（删除）
+            diag = matrix[i - 1, j - 1] + score.mis_match_char(x[i - 1], y[j - 1])  # 从对角线来（匹配/替换）
+            matrix[i, j] = max(left, up, diag)  # 取最大值
+            if matrix[i, j] == left:    # 如果来自左
                 trace_back[i, j] = 1
-            elif matrix[i, j] == up:
+            elif matrix[i, j] == up:    # 上
                 trace_back[i, j] = 2
-            else:
+            else:   # 对角线
                 trace_back[i, j] = 3
     return matrix, trace_back
 
-
+# 根据 trace_back 矩阵，从右下角回溯，恢复出对齐后的两个序列，并建立 y→x 的位置映射关系
 def get_aligned_sequences(x, y, trace_back):
-    x_seq = []
+    x_seq = []  # 初始化对齐结果
     y_seq = []
-    i = len(x)
+    i = len(x)  # 从右下角开始
     j = len(y)
-    mapper_y_to_x = []
-    while i > 0 or j > 0:
-        if trace_back[i, j] == 3:
-            x_seq.append(x[i - 1])
+    mapper_y_to_x = []  # 初始化映射关系
+    while i > 0 or j > 0:   # 只要没到起点就不停
+        if trace_back[i, j] == 3:   # 如果是对角线
+            x_seq.append(x[i - 1])  # 两个字符对齐
             y_seq.append(y[j - 1])
-            i = i - 1
+            i = i - 1   # 向左上移动
             j = j - 1
-            mapper_y_to_x.append((j, i))
-        elif trace_back[i][j] == 1:
-            x_seq.append("-")
+            mapper_y_to_x.append((j, i))    # 记录点
+        elif trace_back[i][j] == 1: # 来自左边（插入）
+            x_seq.append("-")   # x插入gap,y保留
             y_seq.append(y[j - 1])
-            j = j - 1
+            j = j - 1   # 向左移
             mapper_y_to_x.append((j, -1))
-        elif trace_back[i][j] == 2:
-            x_seq.append(x[i - 1])
+        elif trace_back[i][j] == 2: # 来自上方（删除）
+            x_seq.append(x[i - 1])  # x保留，y插入gap
             y_seq.append("-")
-            i = i - 1
-        elif trace_back[i][j] == 4:
+            i = i - 1   # 向上移动
+        elif trace_back[i][j] == 4: # 起点，结束
             break
-    mapper_y_to_x.reverse()
+    mapper_y_to_x.reverse() # 反转映射
     return x_seq, y_seq, torch.tensor(mapper_y_to_x, dtype=torch.int64)
 
-
+# 把两个 prompt 的 token 序列对齐，生成token 映射，哪些token是真正对齐的标志
 def get_mapper(x: str, y: str, tokenizer, max_len=77):
-    x_seq = tokenizer.encode(x)
+    x_seq = tokenizer.encode(x) # 把文本转成 token id 序列
     y_seq = tokenizer.encode(y)
-    score = ScoreParams(0, 1, -1)
-    matrix, trace_back = global_align(x_seq, y_seq, score)
-    mapper_base = get_aligned_sequences(x_seq, y_seq, trace_back)[-1]
-    alphas = torch.ones(max_len)
-    alphas[: mapper_base.shape[0]] = mapper_base[:, 1].ne(-1).float()
-    mapper = torch.zeros(max_len, dtype=torch.int64)
-    mapper[: mapper_base.shape[0]] = mapper_base[:, 1]
-    mapper[mapper_base.shape[0] :] = len(y_seq) + torch.arange(max_len - len(y_seq))
+    score = ScoreParams(0, 1, -1)   # 定义打分规则
+    matrix, trace_back = global_align(x_seq, y_seq, score)  # 计算 DP 对齐
+    mapper_base = get_aligned_sequences(x_seq, y_seq, trace_back)[-1]   # 回溯得到映射
+    alphas = torch.ones(max_len)    # 初始化全1
+    alphas[: mapper_base.shape[0]] = mapper_base[:, 1].ne(-1).float()   # 标记有效对齐位置
+    mapper = torch.zeros(max_len, dtype=torch.int64)    # 初始化 mapper
+    mapper[: mapper_base.shape[0]] = mapper_base[:, 1]  # 填入对齐映射
+    mapper[mapper_base.shape[0] :] = len(y_seq) + torch.arange(max_len - len(y_seq))    # 处理剩余 padding
     return mapper, alphas
 
-
+# 以第一个 prompt 为基准，把它和后续每个 prompt 做 token 对齐，生成一组 mapper（映射）和 alpha（有效掩码）
 def get_refinement_mapper(prompts, tokenizer, max_len=77):
-    x_seq = prompts[0]
-    mappers, alphas = [], []
-    for i in range(1, len(prompts)):
-        mapper, alpha = get_mapper(x_seq, prompts[i], tokenizer, max_len)
-        mappers.append(mapper)
+    x_seq = prompts[0]  # 取基准 prompt
+    mappers, alphas = [], []    # 初始化列表
+    for i in range(1, len(prompts)):    # 遍历所有编辑 prompt
+        mapper, alpha = get_mapper(x_seq, prompts[i], tokenizer, max_len)   # 计算单个 mapper 和 alpha
+        mappers.append(mapper)  # 保存
         alphas.append(alpha)
     return torch.stack(mappers), torch.stack(alphas)
