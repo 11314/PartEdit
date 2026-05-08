@@ -55,7 +55,8 @@ def _save_image_for_download(edited: Union[PIL.Image.Image, np.ndarray, str, Lis
     if isinstance(img, np.ndarray):
         img = PIL.Image.fromarray(img)
     assert isinstance(img, PIL.Image.Image), "Edited output must be PIL, ndarray, str path, or list of these."
-    out_path = os.path.join(tempfile.gettempdir(), f"partedit_{uuid.uuid4().hex}.png")
+    os.makedirs("outputs", exist_ok=True)
+    out_path = os.path.join("outputs", f"partedit_{uuid.uuid4().hex}.png")  # 保证运行路径是项目文件夹
     img.save(out_path)
     return out_path
 
@@ -121,6 +122,7 @@ def edit_demo(model: PartEditSDXLModel) -> gr.Blocks:
         if seed == -1:
             seed = random.randint(0, MAX_SEED)
         n_cross_replace = float(n_cross_replace) # to make sure 0 and 1 are float
+        print("The parameters of the program are ",prompt, subject, part, edit, negative_prompt, num_inference_steps,guidance_scale, seed, t_e, n_cross_replace)
         out = model.edit(
             prompt=prompt,
             subject=subject,
@@ -222,7 +224,7 @@ def edit_demo(model: PartEditSDXLModel) -> gr.Blocks:
                 )
 
         inputs = [prompt, subject, part, edit, negative_prompt, num_inference_steps, guidance_scale, seed, t_e, n_cross_replace]
-
+        print(f"inputs is {inputs}")
         gr.Examples(
             examples=examples,
             inputs=inputs,

@@ -152,6 +152,7 @@ class PartEditSDXLModel:
             "edit_type": "replace",
             "n_self_replace": 0.0,
             "n_cross_replace": {"default_": 1.0, edit: n_cross_replace},
+            # "local_blend_words": ["hair", "face"],
         }
         extra_params = DotDictExtra()   # 配置额外的 PartEdit 参数（时间与阈值）
         extra_params.update({"omega": 1.5, "edit_steps": t_e})

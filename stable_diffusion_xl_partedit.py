@@ -607,7 +607,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
                     _indx_to_use = i if i < len(uncond_embeds) else len(uncond_embeds) - 1  # use last if we have extra steps
                     # _og_prompt_embeds
                     curr = uncond_embeds[_indx_to_use].to(dtype=prompt_embeds.dtype).to(device).repeat(_og_prompt_embeds.shape[0], 1, 1)
-                    prompt_embeds = torch.cat([curr, _og_prompt_embeds], dim=0)  # For now not changing the pooled prompt embeds
+                    prompt_embeds = torch.cat([curr, _og_prompt_embeds], dim=0)  # 目前不更改池提示嵌入
                     # if prompt_embeds.shape != (2, 77, 2048):
                     #     print(f"Prompt Embeds should be of shape (2, 77, 2048), got {prompt_embeds.shape}")
 
@@ -650,10 +650,10 @@ class PartEditPipeline(StableDiffusionXLPipeline):
                     # Could be removed, with .prev_sample above
                     self.debug_list.append(latents.pred_original_sample.cpu())
 
-                latents = latents.prev_sample  # Needed here because of logging above
+                latents = latents.prev_sample  # 这里需要，因为将上面计入日志
 
                 # 让 controller：更新 attention，控制 mask 生效时间
-                latents = self.controller.step_callback(latents)
+                latents = self.controller.step_callback(latents)    # 查看latents参数内容
 
                 # 注释（Alex）：从SDXL复制
                 if callback_on_step_end is not None:
@@ -1527,7 +1527,7 @@ class AttentionStore(AttentionControl):
                     _val[..., i] = min_max_norm(_val[..., i], _max=_max)
                 _val = _val.sum(-1, keepdim=True)   # 跨token求和
             self.step_store["opt_cross"].append(_val)   # 存入opt_cross
-        if self.extra_kwargs.get("_enable_non_agg_storing", False) and store:   # 可选存原石attention
+        if self.extra_kwargs.get("_enable_non_agg_storing", False) and store:   # 可选存原始attention
             _attn = attn.clone().detach().to(_device, _dtype, non_blocking=True)
             if attn.shape[1] <= 32**2:  # avoid memory overhead
                 self.step_store[key].append(_attn)
@@ -1542,7 +1542,7 @@ class AttentionStore(AttentionControl):
         torch.cuda.empty_cache()
 
     @torch.no_grad()
-    def calculate_mask_t_res(self, use_step_store: bool = False):   # 生成mask
+    def calculate_mask_t_res(self, use_step_store: bool = False):   # 将注意力转换成mask
         mask_t_res = aggregate_attention(   # 输入opt_cross，多层注意力，输出[H,W]
             self,
             res=1024,
@@ -1683,10 +1683,10 @@ class AttentionStore(AttentionControl):
 
 # Copied from https://github.com/RoyiRa/prompt-to-prompt-with-sdxl/blob/e579861f06962b697b37f3c6dd4813c2acdd55bd/processors.py#L246
 class AttentionControlEdit(AttentionStore, abc.ABC):
-    def step_callback(self, x_t):   # 回调使用
+    def step_callback(self, x_t):   # 回调使用，这里的x_t是传入的latents
         if self.local_blend is not None:    # 是否进行局部融合
             # x_t = self.local_blend(x_t, self.attention_store) # TODO: Check if there is more memory efficient way
-            x_t = self.local_blend(x_t, self)
+            x_t = self.local_blend(x_t, self)   # 查看，这两个参数
         return x_t
 
     def replace_self_attention(self, attn_base, att_replace):   # 自注意力替换策略
@@ -1779,10 +1779,10 @@ class AttentionReplace(AttentionControlEdit):
         num_steps: int,
         cross_replace_steps: float,
         self_replace_steps: float,
-        local_blend: Optional[LocalBlend] = None,
+        local_blend: Optional[LocalBlend] = None,   # localblend可以是Localblend实例，也可以是None
         tokenizer=None,
         device=None,
-        attn_res=None,
+        attn_res=None, 
         extra_kwargs: DotDictExtra = None,
     ):
         super(AttentionReplace, self).__init__(
@@ -1952,7 +1952,9 @@ class PartEditCrossAttnProcessor:
             and self.controller.cur_step > self.controller.start_editing_at
             and self.controller.cur_step < self.controller.edit_steps
         )
+        # print("if inter Partedit?")
         if should_edit: # 进入核心
+            # print("inter Partedit ")
             if self.controller.th_strategy == Binarization.PROVIDED_MASK:   # 如果用户提供mask
                 mask_t_res = self.controller.edit_mask.to(hidden_states.device)
                 # resize to reshape
@@ -1996,9 +1998,13 @@ def create_controller(
     equalizer_strengths = cross_attention_kwargs.get("equalizer_strengths")
     n_cross_replace = cross_attention_kwargs.get("n_cross_replace", 0.4)    # 注意力替换比例
     n_self_replace = cross_attention_kwargs.get("n_self_replace", 0.4)
+    print("local_blend_words is ",local_blend_words)
+    print("cross_attention_kwargs is ", cross_attention_kwargs)
+    print ("Whatever use LB?")
 
     # 纯替换,用的是这个？
     if edit_type == "replace" and local_blend_words is None:
+        print("no")
         return AttentionReplace(    # 返回一个替换的实例
             prompts,
             num_inference_steps,
@@ -2012,6 +2018,7 @@ def create_controller(
 
     # 局部替换，使用的是这个分支
     if edit_type == "replace" and local_blend_words is not None:
+        print("yes")
         lb = LocalBlend(
             prompts,
             local_blend_words,
