@@ -35,24 +35,6 @@ bench = load_dataset(
     split="synth"
 )
 
-use_examples = None  # all with None
-
-def _save_image_for_download(edited: Union[PIL.Image.Image, np.ndarray, str, List]) -> str:
-    """Save the first edited image to a temp file and return its filepath."""
-    # clone to be sure we don't modify the input
-    edited = edited.copy() 
-    img = edited[0] if isinstance(edited, list) else edited
-    if isinstance(img, str):
-        # path on disk already
-        return img
-    if isinstance(img, np.ndarray):
-        img = PIL.Image.fromarray(img)
-    assert isinstance(img, PIL.Image.Image), "Edited output must be PIL, ndarray, str path, or list of these."
-    os.makedirs("outputs", exist_ok=True)
-    out_path = os.path.join("outputs", f"partedit_{uuid.uuid4().hex}.png")  # 保证运行路径是项目文件夹
-    img.save(out_path)
-    return out_path
-
 
 
 def get_example(idx, bench):
@@ -76,6 +58,7 @@ def get_example(idx, bench):
 
 def run(
     model,
+    image:str,
     prompt: str,
     subject: str,
     part: str,
@@ -91,7 +74,9 @@ def run(
     if seed == -1:
         seed = random.randint(0, MAX_SEED)
     n_cross_replace = float(n_cross_replace) # to make sure 0 and 1 are float
+    print("The parameters of the program are ",prompt, subject, part, edit, negative_prompt, num_inference_steps,guidance_scale, seed, t_e, n_cross_replace)
     out = model.edit(
+        image = image,
         prompt=prompt,
         subject=subject,
         part=part,
@@ -120,6 +105,7 @@ from PIL import Image
 def run_cli():
     parser = argparse.ArgumentParser(description="PartEdit CLI")
 
+    parser.add_argument("--input_path", type = str, default = "", help = "folder to load image")
     parser.add_argument("--prompt", type=str, required=True)
     parser.add_argument("--subject", type=str, required=True)
     parser.add_argument("--part", type=str, required=True, choices=AVAILABLE_NAME_MAP)
@@ -150,20 +136,22 @@ def run_cli():
     # guidance_scale = float(first_ex[6])
     # seed = int(first_ex[7])
     # t_e = int(first_ex[8])
-    print(prompt,subject,part,edit,negative_prompt)
-    prompt = prompt
-    subject = subject
-    part = part
-    edit = edit
-    negative_prompt = negative_prompt
-    num_inference_steps = num_inference_steps
-    guidance_scale = guidance_scale
-    seed = seed
-    t_e = t_e
+    image_path = args.input_path
+    prompt = args.prompt
+    subject = args.subject
+    part = args.part
+    edit = args.edit
+    negative_prompt = args.negative_prompt
+    num_inference_steps = args.num_inference_steps
+    guidance_scale = args.guidance_scale
+    seed = args.seed
+    t_e = args.t_e
     n_cross_replace = args.n_cross_replace
-
+    print(prompt,subject,part,edit,negative_prompt)
+    image = Image.open(args.input_path).resize((512, 512)).convert('RGB')
     edited, mask = run(
         model,
+        image,
         prompt=prompt,
         subject=subject,
         part=part,

@@ -107,6 +107,7 @@ class PartEditSDXLModel:
 
     def edit(
         self,
+        image: str,
         prompt: str,
         subject: str,
         part: str,
@@ -158,6 +159,7 @@ class PartEditSDXLModel:
         extra_params.update({"omega": 1.5, "edit_steps": t_e})
 
         out = self.partedit_pipe(   # 真正执行 PartEdit（最重的一步）
+            image=image,
             prompt=prompts,
             # negative_prompt=negative_prompt,
             num_inference_steps=num_inference_steps,

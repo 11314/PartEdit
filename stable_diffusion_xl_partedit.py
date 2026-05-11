@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import abc
+import PIL
 import typing
 from collections.abc import Iterable
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from util import *
 import einops
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torchvision import transforms as tfms
 from diffusers import AutoencoderKL, StableDiffusionXLPipeline, UNet2DConditionModel
 from diffusers import __version__ as diffusers_version
 from diffusers.models.lora import adjust_lora_scale_text_encoder
@@ -167,7 +170,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
 
         # 加载VAE
         vae = AutoencoderKL.from_pretrained(
-            "madebyollin/sdxl-vae-fp16-fix",
+            "/hxp/zy/pretrain_models/sdxl-vae-fp16-fix",
             torch_dtype=precision,
             use_safetensors=True,
             resume_download=None,
@@ -349,6 +352,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
         uncond_embeds: Optional[torch.FloatTensor] = None,  # 无条件嵌入从空文本反转
         latents_list=None,
         zs=None,
+        image: Optional[PIL.Image.Image] = None,
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -520,18 +524,25 @@ class PartEditPipeline(StableDiffusionXLPipeline):
         self.scheduler.set_timesteps(num_inference_steps, device=device)
         timesteps = self.scheduler.timesteps
 
-        # 5. 准备潜在变量
-        num_channels_latents = self.unet.config.in_channels
-        latents = self.prepare_latents(
-            batch_size * num_images_per_prompt,
-            num_channels_latents,
-            height,
-            width,
-            prompt_embeds.dtype,
-            device,
-            generator,
-            latents,
-        )
+        # 5. 准备潜在变量，将其改成由图片得来
+        # num_channels_latents = self.unet.config.in_channels
+        # latents = self.prepare_latents(
+        #     batch_size * num_images_per_prompt,
+        #     num_channels_latents,
+        #     height,
+        #     width,
+        #     prompt_embeds.dtype,
+        #     device,
+        #     generator,
+        #     latents,
+        # )
+        latent = self.image2latent(image, device, )
+        print("image2latent out:", latent.dtype)
+        strength = 0.5
+        seed_list = torch.randint(0, 2**62, (batch_size, )).tolist()
+        latents, noises, timesteps = init_latent(latent, self.scheduler, strength, seed_list
+                                            , batch_size, device, num_inference_steps)
+        print("init_latent out:", latents.dtype)
         latents[1] = latents[0] # 强制编辑 prompt 和原 prompt 从同一个噪声起点开始
 
         # 6. 准备额外的步骤。TODO:理想情况下，逻辑应该从管道中移出
@@ -745,6 +756,53 @@ class PartEditPipeline(StableDiffusionXLPipeline):
             image = image.cpu()
             latents = latents.cpu()
         return image
+    
+    @torch.no_grad()
+    def image2latent(
+        self: PartEditPipeline,
+        image: Union[Image.Image, np.ndarray, torch.Tensor],
+        device: torch.device,
+    ) -> torch.Tensor:
+
+        # PIL -> tensor
+        if isinstance(image, Image.Image):
+            image = tfms.ToTensor()(image)
+
+        # np -> tensor
+        elif isinstance(image, np.ndarray):
+            image = torch.from_numpy(image)
+
+            # HWC -> CHW
+            if image.ndim == 3:
+                image = image.permute(2, 0, 1)
+
+        # add batch dim
+        if image.ndim == 3:
+            image = image.unsqueeze(0)
+
+        # move to device + dtype
+        image = image.to(
+            device=device,
+            dtype=self.unet.dtype
+        )
+
+        # normalize [0,1] -> [-1,1]
+        image = image * 2.0 - 1.0
+
+        # sample latent
+        posterior = self.vae.encode(image).latent_dist
+        latents = posterior.sample()
+        # scaling
+        latents = (
+            latents * self.vae.config.scaling_factor
+        )
+
+        latents = latents.to(
+            device=device,
+            dtype=self.unet.dtype
+        )
+
+        return latents
 
     def run_safety_checker(self, image: Union[np.ndarray, torch.Tensor], device: torch.device, dtype: type):
         if self.safety_checker is None:
