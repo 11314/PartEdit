@@ -28,8 +28,8 @@ AVAILABLE_TOKENS = list(PART_TOKENS.keys())
 bench = load_dataset(
     "parquet",
     data_files={
-        "synth": "/hxp/zy/PartEdit/PartEdit-Bench/data/synth-00000-of-00001.parquet",
-        "real": "/hxp/zy/PartEdit/PartEdit-Bench/data/real-00000-of-00001.parquet",
+        "synth": "/hexp/zy/PartEdit/Aleksandar/PartEdit-Bench/data/synth-00000-of-00001.parquet",
+        "real": "/hexp/zy/PartEdit/Aleksandar/PartEdit-Bench/data/real-00000-of-00001.parquet",
     },
     split="synth"
 )
