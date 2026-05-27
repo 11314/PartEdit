@@ -31,7 +31,7 @@ available_pts = [
 
 import os
 
-LOCAL_PARTEDIT_EXTRA = "/hxp/zy/PartEdit/Aleksandar/PartEdit-extra"
+LOCAL_PARTEDIT_EXTRA = "/hexp/zy/PartEdit/Aleksandar/PartEdit-extra"
 
 def download_part(index):
     pt_rel_path = available_pts[index]      # e.g. "pt/partimage_human_head.pt"
@@ -42,7 +42,7 @@ def download_part(index):
             f"[PartEdit] 本地 pt 文件不存在: {pt_abs_path}"
         )
 
-    return pt_abs_path
+    return pt_abs_path                                                                                                                                              
 
 PART_NAME_MAP = {
     "head": "human_head",

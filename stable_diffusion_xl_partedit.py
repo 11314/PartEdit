@@ -156,14 +156,14 @@ class PartEditPipeline(StableDiffusionXLPipeline):
     @staticmethod   # 这是一个静态方法，不依赖类实例（self），可以直接通过类名调用。
     def default_pipeline(device, precision=torch.float16, scheduler_type: str = "euler", load_safety: bool = False) -> Tuple[StableDiffusionXLPipeline, PartEditPipeline]:
         if scheduler_type.strip().lower() in ["ddim", "editfriendly"]:  # 对输入字符串做：去空格，转小写。判断是否是 DDIM / Edit-friendly 模式
-            scheduler = DDIMScheduler.from_pretrained("/hxp/zy/pretrain_models/stable-diffusion-xl-base-1.0", subfolder="scheduler", torch_dtype=precision)  # 从模型中加载DDIM
+            scheduler = DDIMScheduler.from_pretrained("/hexp/zy/pretrained_models/stabilityai/stable-diffusion-xl-base-1.0", subfolder="scheduler", torch_dtype=precision)  # 从模型中加载DDIM
         elif scheduler_type.strip().lower() in "leditspp":
 
             scheduler = DPMSolverMultistepScheduler.from_pretrained(    # 构造 SDE-DPM-Solver++，这是 LEdits++ 中使用的调度器
-                "/hxp/zy/pretrain_models/stable-diffusion-xl-base-1.0", subfolder="scheduler", algorithm_type="sde-dpmsolver++", solver_order=2
+                "/hexp/zy/pretrained_models/stabilityai/stable-diffusion-xl-base-1.0", subfolder="scheduler", algorithm_type="sde-dpmsolver++", solver_order=2
             )  # LEdits
         else:   # 默认情况下，使用 Euler 离散调度器，速度快，稳定。作为默认推理调度器
-            scheduler = EulerDiscreteScheduler.from_pretrained("/hxp/zy/pretrain_models/stable-diffusion-xl-base-1.0", subfolder="scheduler", torch_dtype=precision)
+            scheduler = EulerDiscreteScheduler.from_pretrained("/hexp/zy/pretrained_models/stabilityai/stable-diffusion-xl-base-1.0", subfolder="scheduler", torch_dtype=precision)
 
         # 加载VAE
         vae = AutoencoderKL.from_pretrained(
@@ -174,18 +174,18 @@ class PartEditPipeline(StableDiffusionXLPipeline):
         )
         # 构造“原始 SDXL pipeline”
         default_pipe = StableDiffusionXLPipeline.from_pretrained(
-            "/hxp/zy/pretrain_models/stable-diffusion-xl-base-1.0",
+            "/hexp/zy/pretrained_models/stabilityai/stable-diffusion-xl-base-1.0",
             device=device,
             vae=vae,
             resume_download=None,
-            scheduler=DDIMScheduler.from_pretrained("/hxp/zy/pretrain_models/stable-diffusion-xl-base-1.0", subfolder="scheduler", torch_dtype=precision),
+            scheduler=DDIMScheduler.from_pretrained("/hexp/zy/pretrained_models/stabilityai/stable-diffusion-xl-base-1.0", subfolder="scheduler", torch_dtype=precision),
             torch_dtype=precision,
         )
 
         # 是否加载 NSFW 安全模块（可选）
         safety_checker = (
             StableDiffusionSafetyChecker.from_pretrained(
-                "/hxp/zy/pretrain_models/stable-diffusion-v1-5",  # runwayml/stable-diffusion-v1-5",
+                "/hexp/zy/pretrained_models/stable-diffusion-v1-5",  # runwayml/stable-diffusion-v1-5",
                 device_map=device,
                 torch_dtype=precision,
                 subfolder="safety_checker",
@@ -196,7 +196,7 @@ class PartEditPipeline(StableDiffusionXLPipeline):
         # 在NSFW开启时，给 safety checker 提供图像特征
         feature_extractor = (
             CLIPImageProcessor.from_pretrained(
-                "/hxp/zy/pretrain_models/stable-diffusion-v1-5",  # "runwayml/stable-diffusion-v1-5",
+                "/hexp/zy/pretrained_models/stable-diffusion-v1-5",  # "runwayml/stable-diffusion-v1-5",
                 subfolder="feature_extractor",
                 device_map=device,
             )
